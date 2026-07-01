@@ -1,0 +1,5 @@
+/bin/
+*.db
+*.db-journal
+*.test
+coverage.out
