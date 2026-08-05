@@ -1,0 +1,78 @@
+package sql
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestLex(t *testing.T) {
+	tokens, err := Lex(`select "select", 'a''b', X'00ff', 12, .5, 2e-3, ?, ? -- ?
+ /* ? */ FROM café WHERE a<=1 AND b!=2;`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tokens[0].Kind != TokenKeyword || tokens[0].Text != "SELECT" || tokens[1].Kind != TokenIdentifier || tokens[1].Text != "select" {
+		t.Fatal(tokens[:2])
+	}
+	parameters := 0
+	for i, tok := range tokens {
+		if tok.Kind == TokenParameter {
+			if tok.Value != parameters {
+				t.Fatal(tok)
+			}
+			parameters++
+		}
+		if i > 0 && tok.Pos <= tokens[i-1].Pos {
+			t.Fatal("non-increasing offsets")
+		}
+	}
+	if parameters != 2 || tokens[len(tokens)-1].Kind != TokenEOF {
+		t.Fatal(tokens)
+	}
+	for _, test := range []struct {
+		text  string
+		value any
+	}{{"0", int64(0)}, {"1.0", float64(1)}, {"'a''b'", "a'b"}, {"X'00ff'", []byte{0, 255}}} {
+		ts, err := Lex(test.text)
+		if err != nil || !reflect.DeepEqual(ts[0].Value, test.value) {
+			t.Fatalf("%q: %#v %v", test.text, ts, err)
+		}
+	}
+}
+
+func FuzzLex(f *testing.F) {
+	for _, s := range []string{"", "SELECT ?,'?',X'ff' -- ?", "/* ? */ SELECT \"a\"\"b\"", "1e-2 .5 9223372036854775808", "\xff", "\x00", "'unterminated"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		tokens, err := Lex(input)
+		if err != nil {
+			if tokens != nil {
+				t.Fatal("tokens returned with error")
+			}
+			return
+		}
+		if len(tokens) == 0 || tokens[len(tokens)-1].Kind != TokenEOF || tokens[len(tokens)-1].Pos != len(input) {
+			t.Fatal("missing EOF")
+		}
+		parameter := 0
+		for i, tok := range tokens {
+			if tok.Pos < 0 || tok.Pos > len(input) || i > 0 && tok.Pos <= tokens[i-1].Pos {
+				t.Fatal("invalid token offsets")
+			}
+			if tok.Kind == TokenEOF && i != len(tokens)-1 {
+				t.Fatal("early EOF")
+			}
+			if tok.Kind == TokenParameter {
+				if tok.Value != parameter {
+					t.Fatal("parameter indexes not lexical")
+				}
+				parameter++
+			}
+		}
+		again, err := Lex(input)
+		if err != nil || !reflect.DeepEqual(tokens, again) {
+			t.Fatal("non-deterministic lexer")
+		}
+	})
+}
