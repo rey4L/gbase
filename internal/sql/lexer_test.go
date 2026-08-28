@@ -40,6 +40,18 @@ func TestLex(t *testing.T) {
 	}
 }
 
+func TestFunctionNameTokens(t *testing.T) {
+	tokens, err := Lex("count sum avg min max AvG lower COALESCE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"count", "sum", "avg", "min", "max", "AvG", "lower", "COALESCE"} {
+		if tokens[i].Kind != TokenIdentifier || tokens[i].Text != name {
+			t.Fatalf("function name must remain an identifier: %#v", tokens[i])
+		}
+	}
+}
+
 func FuzzLex(f *testing.F) {
 	for _, s := range []string{"", "SELECT ?,'?',X'ff' -- ?", "/* ? */ SELECT \"a\"\"b\"", "1e-2 .5 9223372036854775808", "\xff", "\x00", "'unterminated"} {
 		f.Add(s)

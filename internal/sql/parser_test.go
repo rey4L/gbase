@@ -130,6 +130,50 @@ func TestExpressionPrecedence(t *testing.T) {
 	}
 }
 
+func TestFunctionNamesAsIdentifiers(t *testing.T) {
+	for _, name := range []string{"count", "sum", "avg", "min", "max", "AvG"} {
+		t.Run(name, func(t *testing.T) {
+			table := mustParse(t, "CREATE TABLE "+name+" ("+name+" INTEGER, UNIQUE("+name+"))").(*CreateTable)
+			if table.Name != name || table.Columns[0].Name != name || table.Constraints[0].Column != name {
+				t.Fatalf("identifier spelling lost: %#v", table)
+			}
+			s := mustParse(t, "SELECT "+name+", t."+name+" AS "+name+", AVG("+name+") "+name+" FROM "+name+" AS t ORDER BY "+name).(*Select)
+			if s.Columns[0].Expr.(*Column).Name != name || s.Columns[1].Expr.(*Column).Name != name || s.Columns[1].Alias != name || s.Columns[2].Alias != name || s.Columns[2].Expr.(*Call).Name != "AVG" || s.OrderBy[0].Expr.(*Column).Name != name {
+				t.Fatalf("incorrect name context: %#v", s)
+			}
+			for _, input := range []string{
+				"SELECT " + name + ".* FROM t " + name,
+				"CREATE INDEX " + name + " ON t (" + name + ")",
+				"INSERT INTO t(" + name + ") VALUES(1)",
+				"UPDATE t SET " + name + "=" + name + "+1",
+				"DELETE FROM t WHERE " + name + "=1",
+			} {
+				mustParse(t, input)
+			}
+		})
+	}
+}
+
+func TestGenericFunctionCalls(t *testing.T) {
+	s := mustParse(t, `SELECT lower(name), UPPER(name), length(name), abs(-amount), coalesce(NULL, ?, lower(?)), mystery(), mystery(1, 2), "custom"(3), count(*), sum(*) FROM t`).(*Select)
+	wantNames := []string{"LOWER", "UPPER", "LENGTH", "ABS", "COALESCE", "MYSTERY", "MYSTERY", "CUSTOM", "COUNT", "SUM"}
+	wantArity := []int{1, 1, 1, 1, 3, 0, 2, 1, 0, 0}
+	for i, name := range wantNames {
+		call, ok := s.Columns[i].Expr.(*Call)
+		if !ok || call.Name != name || len(call.Args) != wantArity[i] || call.Star != (i >= 8) {
+			t.Fatalf("call %d: %#v", i, s.Columns[i].Expr)
+		}
+	}
+	coalesce := s.Columns[4].Expr.(*Call)
+	if coalesce.Args[1].(*Parameter).Index != 0 || coalesce.Args[2].(*Call).Args[0].(*Parameter).Index != 1 || ParameterCount(s) != 2 {
+		t.Fatal("nested call parameters lost")
+	}
+	// Arity and function availability belong to binding, not SQL syntax parsing.
+	for _, input := range []string{"SELECT COUNT()", "SELECT MAX(a,b)", "SELECT unknown_func(a)", "SELECT COALESCE()", "SELECT unknown_func(*)"} {
+		mustParse(t, input)
+	}
+}
+
 func TestLiteralValues(t *testing.T) {
 	s := mustParse(t, `SELECT 9223372036854775807,-9223372036854775808,1.25,1e2,.5,1.,'a''b',X'0041ff',NULL`).(*Select)
 	values := []any{int64(math.MaxInt64), int64(math.MinInt64), float64(1.25), float64(100), float64(.5), float64(1), "a'b", []byte{0, 65, 255}, nil}
@@ -152,7 +196,7 @@ func TestRejectUnsupportedAndMalformed(t *testing.T) {
 		"SELECT * FROM t RIGHT JOIN u ON t.a=u.a", "SELECT * FROM t CROSS JOIN u", "SELECT * FROM t,u",
 		"SELECT * FROM t LEFT JOIN u", "SELECT * FROM t JOIN u USING(a)", "SELECT (SELECT a FROM t)",
 		"SELECT 1 UNION SELECT 2", "SELECT a IN (1)", "SELECT a LIKE 'x'", "SELECT a BETWEEN 1 AND 2", "SELECT a IS 1",
-		"SELECT a IS NOT", "SELECT *+1", "SELECT SUM(*)", "SELECT COUNT()", "SELECT COUNT(DISTINCT a)", "SELECT MAX(a,b)", "SELECT abs(a)",
+		"SELECT a IS NOT", "SELECT *+1", "SELECT COUNT(DISTINCT a)", "SELECT abs(,a)", "SELECT abs(a,)", "SELECT f(*,a)", "SELECT f(a,*)", "SELECT f(",
 		"SELECT t.* AS x", "SELECT TRUE", "SELECT 1%2", "SELECT 1||2", "SELECT 1e", "SELECT 1e9999", "SELECT 9223372036854775808", "SELECT 9223372036854775809",
 		"SELECT * FROM t LIMIT -1", "SELECT * FROM t LIMIT 1.5", "SELECT * FROM t LIMIT a", "SELECT * FROM t LIMIT 1,2", "SELECT * FROM t OFFSET -1",
 		"SELECT 'unclosed", "SELECT X'0'", "SELECT X'gg'", "SELECT \"\"", "SELECT 1 /* unclosed", "SELECT \x00", "SELECT \xff",
@@ -222,7 +266,7 @@ func TestWalkParameters(t *testing.T) {
 }
 
 func FuzzParse(f *testing.F) {
-	for _, s := range []string{"SELECT 1", "SELECT ?+? FROM t WHERE a IS NULL", "CREATE TABLE t (a INTEGER PRIMARY KEY,b BLOB DEFAULT X'ff')", "INSERT INTO t VALUES(1),(2)", "SELECT COUNT(*) FROM t GROUP BY a HAVING SUM(a)>1", "SELECT " + strings.Repeat("(", 260) + "1", "\xff", ""} {
+	for _, s := range []string{"SELECT 1", "SELECT ?+? FROM t WHERE a IS NULL", "CREATE TABLE t (a INTEGER PRIMARY KEY,b BLOB DEFAULT X'ff')", "INSERT INTO t VALUES(1),(2)", "SELECT COUNT(*) FROM t GROUP BY a HAVING SUM(a)>1", "SELECT coalesce(?,lower(?)) AS avg FROM t", "SELECT unknown_func(), avg FROM t", "SELECT " + strings.Repeat("(", 260) + "1", "\xff", ""} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, input string) {

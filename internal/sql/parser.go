@@ -544,19 +544,16 @@ func (p *parser) expression(min int) Expr {
 			left = &Parameter{Index: t.Value.(int)}
 		case TokenIdentifier:
 			name := p.ident()
+			if p.is("(") {
+				left = p.call(name)
+				break
+			}
 			c := &Column{Name: name}
 			if p.take(".") {
 				c.Table = name
 				c.Name = p.ident()
 			}
 			left = c
-		case TokenKeyword:
-			if t.Text == "COUNT" || t.Text == "SUM" || t.Text == "AVG" || t.Text == "MIN" || t.Text == "MAX" {
-				p.next()
-				left = p.call(t.Text)
-			} else {
-				p.fail("expected expression, found %q", t.Text)
-			}
 		default:
 			p.fail("expected expression, found %q", t.Text)
 		}
@@ -585,15 +582,13 @@ func (p *parser) expression(min int) Expr {
 	return left
 }
 func (p *parser) call(name string) Expr {
-	c := &Call{Name: name}
+	// Function availability and arity are checked by the binder.
+	c := &Call{Name: strings.ToUpper(name)}
 	p.expect("(")
 	if p.take("*") {
-		if name != "COUNT" {
-			p.fail("only COUNT accepts *")
-		}
 		c.Star = true
-	} else {
-		c.Args = []Expr{p.expression(1)}
+	} else if !p.is(")") {
+		c.Args = p.exprList()
 	}
 	p.expect(")")
 	return c
