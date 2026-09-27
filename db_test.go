@@ -401,3 +401,24 @@ func TestCursorCancellation(t *testing.T) {
 		t.Fatal("canceled Begin succeeded")
 	}
 }
+
+func TestUpdateWritesOnlyChangedPages(t *testing.T) {
+	db := openTest(t)
+	execTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, n INTEGER)")
+	execTest(t, db, "INSERT INTO t VALUES (1,1)")
+	writes := 0
+	db.pager.Fault = func(point string) error {
+		if point == "db-page-written" {
+			writes++
+		}
+		return nil
+	}
+	execTest(t, db, "UPDATE t SET n=2 WHERE id=1")
+	db.pager.Fault = nil
+	if writes != 2 {
+		t.Fatalf("expected table page and metadata page, wrote %d pages", writes)
+	}
+	if got := queryTest(t, db, "SELECT n FROM t"); got[0][0] != int64(2) {
+		t.Fatal(got)
+	}
+}

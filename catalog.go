@@ -1,6 +1,7 @@
 package gbase
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -77,6 +78,13 @@ func (tx *Tx) saveCatalog() error {
 		return e
 	}
 	tr := storage.Tree{Tx: tx.pages, Root: root}
+	existing, found, err := tr.Get([]byte("catalog"))
+	if err != nil {
+		return err
+	}
+	if found && bytes.Equal(existing, b) {
+		return nil
+	}
 	if e = tr.Put([]byte("catalog"), b); e != nil {
 		return e
 	}
