@@ -3,6 +3,7 @@ package gbase
 import (
 	"context"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -41,16 +42,15 @@ func (tx *Tx) queryContext() error {
 	}
 	return tx.ctx.Err()
 }
+
 func containsAggregate(x sql.Expr) bool {
 	switch e := x.(type) {
 	case *sql.Call:
 		if aggregate(e.Name) {
 			return true
 		}
-		for _, a := range e.Args {
-			if containsAggregate(a) {
-				return true
-			}
+		if slices.ContainsFunc(e.Args, containsAggregate) {
+			return true
 		}
 	case *sql.Binary:
 		return containsAggregate(e.Left) || containsAggregate(e.Right)
@@ -59,6 +59,7 @@ func containsAggregate(x sql.Expr) bool {
 	}
 	return false
 }
+
 func groupedExpr(x sql.Expr, groups []sql.Expr) bool {
 	for _, g := range groups {
 		if reflect.DeepEqual(x, g) {
@@ -84,6 +85,7 @@ func groupedExpr(x sql.Expr, groups []sql.Expr) bool {
 	}
 	return true
 }
+
 func queryBound(x sql.Expr, args []Value, def int64) (int64, error) {
 	if x == nil {
 		return def, nil
@@ -103,6 +105,7 @@ func queryBound(x sql.Expr, args []Value, def int64) (int64, error) {
 	}
 	return n, nil
 }
+
 func (tx *Tx) compileSelect(s *sql.Select, args []Value) (*queryProgram, error) {
 	if e := tx.queryContext(); e != nil {
 		return nil, e
@@ -259,6 +262,7 @@ func (tx *Tx) compileSelect(s *sql.Select, args []Value) (*queryProgram, error) 
 	}
 	return p, nil
 }
+
 func (p *queryProgram) orderExpr(x sql.Expr) (sql.Expr, error) {
 	if c, ok := x.(*sql.Column); ok && c.Table == "" {
 		var found sql.Expr
@@ -284,6 +288,7 @@ func (p *queryProgram) orderExpr(x sql.Expr) (sql.Expr, error) {
 	}
 	return x, nil
 }
+
 func (p *queryProgram) chooseIndex(tx *Tx, args []Value) {
 	if len(p.env.bindings) == 0 {
 		return
@@ -320,7 +325,7 @@ func (p *queryProgram) chooseIndex(tx *Tx, args []Value) {
 			c, ok := left.(*sql.Column)
 			if !ok {
 				c, ok = right.(*sql.Column)
-				left, right = right, left
+				right = left
 				switch op {
 				case "<":
 					op = ">"
@@ -393,6 +398,7 @@ func (p *queryProgram) chooseIndex(tx *Tx, args []Value) {
 		}
 	}
 }
+
 func (p *queryProgram) columns() []string {
 	out := make([]string, len(p.items))
 	for i, it := range p.items {
@@ -403,6 +409,7 @@ func (p *queryProgram) columns() []string {
 	}
 	return out
 }
+
 func (tx *Tx) sourceRows(p *queryProgram) (func() (evalEnv, bool, error), error) {
 	ctx := tx.ctx
 	if len(p.env.bindings) == 0 {
@@ -459,6 +466,7 @@ func (tx *Tx) sourceRows(p *queryProgram) (func() (evalEnv, bool, error), error)
 		return evalEnv{bindings: []evalBinding{b}}, true, nil
 	}, nil
 }
+
 func evalFilter(x sql.Expr, env evalEnv, args []Value) (bool, error) {
 	if x == nil {
 		return true, nil
@@ -469,6 +477,7 @@ func evalFilter(x sql.Expr, env evalEnv, args []Value) (bool, error) {
 	}
 	return truth(v)
 }
+
 func (p *queryProgram) project(env evalEnv, args []Value) (queryRow, error) {
 	r := queryRow{env: env}
 	for _, item := range p.items {
@@ -488,6 +497,7 @@ func (p *queryProgram) project(env evalEnv, args []Value) (queryRow, error) {
 	}
 	return r, nil
 }
+
 func (tx *Tx) executeSelect(s *sql.Select, args []Value) (*queryResult, error) {
 	p, e := tx.compileSelect(s, args)
 	if e != nil {
@@ -726,6 +736,7 @@ func (tx *Tx) executeSelect(s *sql.Select, args []Value) (*queryResult, error) {
 	}
 	return q, nil
 }
+
 func equalValues(a, b []Value) (bool, error) {
 	if len(a) != len(b) {
 		return false, nil
@@ -747,6 +758,7 @@ func equalValues(a, b []Value) (bool, error) {
 	}
 	return true, nil
 }
+
 func (tx *Tx) explainSelect(s *sql.Select, args []Value) (*queryResult, error) {
 	p, e := tx.compileSelect(s, args)
 	if e != nil {
