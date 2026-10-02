@@ -9,7 +9,10 @@ import (
 	"unicode"
 )
 
-const historyLimit = 500
+const (
+	historyLimit = 500
+	clearScreen  = "\x1b[2J\x1b[H"
+)
 
 // lineEditor is an io.Reader adapter: the SQL splitter still receives ordinary
 // newline-terminated text, while terminal editing stays in this input layer.
@@ -198,8 +201,12 @@ func (e *lineEditor) readLine() (string, error) {
 			line.cursor = 0
 		case '\x0b':
 			line.text = line.text[:line.cursor]
+		case '\x0c':
+			if _, err := fmt.Fprint(e.output, clearScreen); err != nil {
+				return "", err
+			}
 		case '\t':
-			for i := 0; i < 4; i++ {
+			for range 5 {
 				line.insert(' ')
 			}
 		default:

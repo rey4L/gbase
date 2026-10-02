@@ -18,9 +18,11 @@ import (
 const PageSize = 4096
 
 // PageDataSize excludes the final four bytes, which the pager owns as a CRC.
-const PageDataSize = PageSize - 4
-const CachePages = 64
-const formatVersion = 1
+const (
+	PageDataSize  = PageSize - 4
+	CachePages    = 64
+	formatVersion = 1
+)
 
 var (
 	ErrCorrupt   = errors.New("storage: corrupt database or journal")
@@ -71,6 +73,7 @@ type Snapshot struct {
 
 func checksum(b []byte) uint32 { return crc32.ChecksumIEEE(b) }
 func seal(b []byte)            { binary.LittleEndian.PutUint32(b[PageSize-4:], checksum(b[:PageSize-4])) }
+
 func valid(b []byte) bool {
 	return len(b) == PageSize && binary.LittleEndian.Uint32(b[PageSize-4:]) == checksum(b[:PageSize-4])
 }
@@ -88,6 +91,7 @@ func metadata(count, root, head, nfree uint32) []byte {
 	seal(b)
 	return b
 }
+
 func syncDir(path string) error {
 	d, err := os.Open(filepath.Dir(path))
 	if err != nil {
@@ -96,6 +100,7 @@ func syncDir(path string) error {
 	defer d.Close()
 	return d.Sync()
 }
+
 func writeAt(f *os.File, b []byte, off int64) error {
 	n, err := f.WriteAt(b, off)
 	if err == nil && n != len(b) {
@@ -103,6 +108,7 @@ func writeAt(f *os.File, b []byte, off int64) error {
 	}
 	return err
 }
+
 func readPage(f *os.File, id uint32) ([]byte, error) {
 	b := make([]byte, PageSize)
 	_, err := f.ReadAt(b, int64(id)*PageSize)
@@ -116,7 +122,7 @@ func Open(path string) (p *Pager, err error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -157,6 +163,7 @@ func Open(path string) (p *Pager, err error) {
 	}
 	return p, nil
 }
+
 func (p *Pager) load() error {
 	b, err := readPage(p.file, 0)
 	if err != nil {
@@ -196,6 +203,7 @@ func (p *Pager) load() error {
 	}
 	return nil
 }
+
 func (p *Pager) check() error {
 	if p.closed {
 		return ErrClosed
@@ -205,6 +213,7 @@ func (p *Pager) check() error {
 	}
 	return nil
 }
+
 func (p *Pager) Begin() (*Tx, error) {
 	if err := p.check(); err != nil {
 		return nil, err
@@ -216,6 +225,7 @@ func (p *Pager) Begin() (*Tx, error) {
 	p.active = t
 	return t, nil
 }
+
 func (p *Pager) Close() error {
 	if p.closed {
 		return nil
@@ -228,6 +238,7 @@ func (p *Pager) Close() error {
 	// Closing the descriptor releases flock, including on a poisoned pager.
 	return p.file.Close()
 }
+
 func cloneFree(m map[uint32]bool) map[uint32]bool {
 	n := make(map[uint32]bool, len(m))
 	for k, v := range m {
@@ -235,6 +246,7 @@ func cloneFree(m map[uint32]bool) map[uint32]bool {
 	}
 	return n
 }
+
 func cloneDirty(m map[uint32][]byte) map[uint32][]byte {
 	n := make(map[uint32][]byte, len(m))
 	for k, v := range m {
@@ -242,6 +254,7 @@ func cloneDirty(m map[uint32][]byte) map[uint32][]byte {
 	}
 	return n
 }
+
 func (t *Tx) check() error {
 	if err := t.p.check(); err != nil {
 		return err
@@ -251,12 +264,14 @@ func (t *Tx) check() error {
 	}
 	return nil
 }
+
 func (t *Tx) page(id uint32) error {
 	if id == 0 || id >= t.count || t.free[id] {
 		return ErrPage
 	}
 	return nil
 }
+
 func (t *Tx) Read(id uint32) ([]byte, error) {
 	if err := t.check(); err != nil {
 		return nil, err
@@ -328,6 +343,7 @@ func (t *Tx) Alloc() (uint32, error) {
 	seal(t.dirty[id])
 	return id, nil
 }
+
 func (t *Tx) Free(id uint32) error {
 	if err := t.check(); err != nil {
 		return err
@@ -378,9 +394,11 @@ func (t *Tx) CheckOwnership(owned []uint32) error {
 	}
 	return nil
 }
+
 func (t *Tx) Savepoint() Snapshot {
 	return Snapshot{t, t.count, t.root, cloneFree(t.free), cloneDirty(t.dirty)}
 }
+
 func (t *Tx) Restore(s Snapshot) error {
 	if err := t.check(); err != nil {
 		return err
@@ -393,6 +411,7 @@ func (t *Tx) Restore(s Snapshot) error {
 	t.dirty = cloneDirty(s.dirty)
 	return nil
 }
+
 func (t *Tx) Rollback() error {
 	if err := t.check(); err != nil {
 		return err
@@ -401,12 +420,14 @@ func (t *Tx) Rollback() error {
 	t.p.active = nil
 	return nil
 }
+
 func (p *Pager) fault(point string) error {
 	if p.Fault != nil {
 		return p.Fault(point)
 	}
 	return nil
 }
+
 func ids(m map[uint32][]byte) []uint32 {
 	r := make([]uint32, 0, len(m))
 	for id := range m {
@@ -517,8 +538,9 @@ func journalHeader(length uint64, n uint32, ready uint32, bodyCRC uint32) []byte
 	seal(b)
 	return b
 }
+
 func (p *Pager) journal(originals map[uint32][]byte) (err error) {
-	f, err := os.OpenFile(p.path+"-journal", os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := os.OpenFile(p.path+"-journal", os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
@@ -572,6 +594,7 @@ func (p *Pager) journal(originals map[uint32][]byte) (err error) {
 	}
 	return p.fault("journal-dir-synced")
 }
+
 func (p *Pager) recover() error {
 	f, err := os.Open(p.path + "-journal")
 	if errors.Is(err, os.ErrNotExist) {

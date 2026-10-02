@@ -55,6 +55,7 @@ func Open(path string) (*DB, error) {
 	d.gate <- struct{}{}
 	return d, nil
 }
+
 func (db *DB) Begin(ctx context.Context) (*Tx, error) {
 	if ctx == nil {
 		return nil, fail("context", "nil context")
@@ -91,6 +92,7 @@ func (db *DB) Begin(ctx context.Context) (*Tx, error) {
 	db.active = tx
 	return tx, nil
 }
+
 func (db *DB) Close() error {
 	db.mu.Lock()
 	if db.closed {
@@ -108,6 +110,7 @@ func (db *DB) Close() error {
 	db.gate <- struct{}{}
 	return e
 }
+
 func (db *DB) Exec(ctx context.Context, query string, args ...any) (Result, error) {
 	tx, e := db.Begin(ctx)
 	if e != nil {
@@ -121,6 +124,7 @@ func (db *DB) Exec(ctx context.Context, query string, args ...any) (Result, erro
 	e = tx.Commit()
 	return r, e
 }
+
 func (db *DB) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
 	tx, e := db.Begin(ctx)
 	if e != nil {
@@ -150,6 +154,7 @@ func (db *DB) Query(ctx context.Context, query string, args ...any) (*Rows, erro
 	tx.mu.Unlock()
 	return rows, nil
 }
+
 func parameters(args []any) ([]Value, error) {
 	out := make([]Value, len(args))
 	for i, v := range args {
@@ -161,6 +166,7 @@ func parameters(args []any) ([]Value, error) {
 	}
 	return out, nil
 }
+
 func (tx *Tx) ready(ctx context.Context) error {
 	if tx.done {
 		return ErrClosed
@@ -176,6 +182,7 @@ func (tx *Tx) ready(ctx context.Context) error {
 	}
 	return ctx.Err()
 }
+
 func (tx *Tx) Exec(ctx context.Context, query string, args ...any) (Result, error) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
@@ -216,6 +223,7 @@ func (tx *Tx) Exec(ctx context.Context, query string, args ...any) (Result, erro
 	}
 	return r, nil
 }
+
 func (tx *Tx) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
@@ -261,6 +269,7 @@ func (tx *Tx) Query(ctx context.Context, query string, args ...any) (*Rows, erro
 	tx.cursor = rows
 	return rows, nil
 }
+
 func (tx *Tx) finish(commit bool) error {
 	tx.mu.Lock()
 	if tx.done {
@@ -351,6 +360,7 @@ func (r *Rows) Next() bool {
 	}
 	return ok
 }
+
 func (r *Rows) Values() []Value {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -386,6 +396,7 @@ func (r *Rows) Close() error {
 	}
 	return nil
 }
+
 func (db *DB) Check(ctx context.Context) error {
 	tx, e := db.Begin(ctx)
 	if e != nil {
@@ -399,6 +410,7 @@ func (db *DB) Check(ctx context.Context) error {
 	}
 	return tx.check()
 }
+
 func (tx *Tx) explain(stmt sql.Statement, args []Value) (*queryResult, error) {
 	s, ok := stmt.(*sql.Select)
 	if !ok {

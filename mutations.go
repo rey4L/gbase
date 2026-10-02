@@ -22,6 +22,7 @@ func checkParameters(stmt sql.Statement, n int) error {
 	}
 	return nil
 }
+
 func (tx *Tx) execute(stmt sql.Statement, args []Value) (Result, error) {
 	switch s := stmt.(type) {
 	case *sql.CreateTable:
@@ -42,6 +43,7 @@ func (tx *Tx) execute(stmt sql.Statement, args []Value) (Result, error) {
 		return Result{}, fail("statement", "Exec requires schema or mutation statement")
 	}
 }
+
 func (tx *Tx) createTable(s *sql.CreateTable) error {
 	name := canon(s.Name)
 	if tx.cat.Tables[name] != nil {
@@ -149,6 +151,7 @@ func (tx *Tx) createTable(s *sql.CreateTable) error {
 	}
 	return nil
 }
+
 func (tx *Tx) dropTable(s *sql.DropTable) error {
 	t, e := tx.getTable(s.Name)
 	if e != nil {
@@ -183,6 +186,7 @@ func (tx *Tx) dropTable(s *sql.DropTable) error {
 	delete(tx.cat.Tables, canon(t.Name))
 	return nil
 }
+
 func (tx *Tx) createIndex(s *sql.CreateIndex) error {
 	if len(s.Columns) != 1 {
 		return fail("schema", "only single-column indexes supported")
@@ -206,6 +210,7 @@ func (tx *Tx) createIndex(s *sql.CreateIndex) error {
 	}
 	return tx.addIndex(s.Name, t, s.Columns[0], s.Unique, false)
 }
+
 func (tx *Tx) addIndex(name string, t *table, col string, unique, automatic bool) error {
 	p := t.col(col)
 	if p < 0 {
@@ -228,6 +233,7 @@ func (tx *Tx) addIndex(name string, t *table, col string, unique, automatic bool
 	}
 	return nil
 }
+
 func (tx *Tx) dropIndex(s *sql.DropIndex) error {
 	i := tx.cat.Indexes[canon(s.Name)]
 	if i == nil {
@@ -265,6 +271,7 @@ func (tx *Tx) dropIndex(s *sql.DropIndex) error {
 	delete(tx.cat.Indexes, canon(s.Name))
 	return nil
 }
+
 func coerce(c column, v Value) (Value, error) {
 	if v == nil {
 		if c.NotNull {
@@ -295,6 +302,7 @@ func coerce(c column, v Value) (Value, error) {
 	}
 	return nil, fail("type", "%s requires %s", c.Name, c.Type)
 }
+
 func (tx *Tx) scanTable(t *table) ([]storedRow, error) {
 	tr := storage.Tree{Tx: tx.pages, Root: t.Root}
 	c, e := tr.Scan(nil, nil)
@@ -321,6 +329,7 @@ func (tx *Tx) scanTable(t *table) ([]storedRow, error) {
 	}
 	return out, c.Err()
 }
+
 func (tx *Tx) indexes(t *table) []*index {
 	var out []*index
 	for _, i := range tx.cat.Indexes {
@@ -331,6 +340,7 @@ func (tx *Tx) indexes(t *table) []*index {
 	sort.Slice(out, func(a, b int) bool { return out[a].Name < out[b].Name })
 	return out
 }
+
 func (tx *Tx) indexInsert(i *index, id int64, v Value) error {
 	p, e := indexPrefix(v)
 	if e != nil {
@@ -355,6 +365,7 @@ func (tx *Tx) indexInsert(i *index, id int64, v Value) error {
 	i.Root = tr.Root
 	return nil
 }
+
 func (tx *Tx) indexDelete(i *index, id int64, v Value) error {
 	p, e := indexPrefix(v)
 	if e != nil {
@@ -367,6 +378,7 @@ func (tx *Tx) indexDelete(i *index, id int64, v Value) error {
 	i.Root = tr.Root
 	return nil
 }
+
 func (tx *Tx) putRow(t *table, id int64, v []Value) error {
 	data, e := encodeRecord(v)
 	if e != nil {
@@ -389,6 +401,7 @@ func (tx *Tx) putRow(t *table, id int64, v []Value) error {
 	}
 	return nil
 }
+
 func (tx *Tx) removeRow(t *table, r storedRow) error {
 	for _, i := range tx.indexes(t) {
 		if e := tx.indexDelete(i, r.id, r.values[t.col(i.Column)]); e != nil {
@@ -402,6 +415,7 @@ func (tx *Tx) removeRow(t *table, r storedRow) error {
 	t.Root = tr.Root
 	return nil
 }
+
 func (tx *Tx) insert(s *sql.Insert, args []Value) (Result, error) {
 	t, e := tx.getTable(s.Table)
 	if e != nil {
@@ -498,6 +512,7 @@ func (tx *Tx) insert(s *sql.Insert, args []Value) (Result, error) {
 	}
 	return result, nil
 }
+
 func (tx *Tx) uniqueColumn(t *table, name string) bool {
 	p := t.col(name)
 	if p < 0 {
@@ -513,6 +528,7 @@ func (tx *Tx) uniqueColumn(t *table, name string) bool {
 	}
 	return false
 }
+
 func (tx *Tx) referencedValue(t *table, name string, value Value) (bool, error) {
 	p := t.col(name)
 	if p < 0 {
@@ -545,6 +561,7 @@ func (tx *Tx) referencedValue(t *table, name string, value Value) (bool, error) 
 	}
 	return false, fail("corrupt", "foreign key target lacks unique index")
 }
+
 func (tx *Tx) foreignKeys(t *table, values []Value) error {
 	for p, c := range t.Columns {
 		if c.Ref == nil || values[p] == nil {
@@ -564,6 +581,7 @@ func (tx *Tx) foreignKeys(t *table, values []Value) error {
 	}
 	return nil
 }
+
 func sameValue(a, b Value) bool {
 	if x, ok := a.([]byte); ok {
 		y, ok := b.([]byte)
@@ -571,6 +589,7 @@ func sameValue(a, b Value) bool {
 	}
 	return reflect.DeepEqual(a, b)
 }
+
 func (tx *Tx) restrict(t *table, old storedRow, newValues []Value) error {
 	for _, child := range tx.cat.Tables {
 		for p, c := range child.Columns {
@@ -603,6 +622,7 @@ func (tx *Tx) restrict(t *table, old storedRow, newValues []Value) error {
 	}
 	return nil
 }
+
 func (tx *Tx) deleteRows(s *sql.Delete, args []Value) (Result, error) {
 	t, e := tx.getTable(s.Table)
 	if e != nil {
@@ -634,6 +654,7 @@ func (tx *Tx) deleteRows(s *sql.Delete, args []Value) (Result, error) {
 	}
 	return result, nil
 }
+
 func (tx *Tx) update(s *sql.Update, args []Value) (Result, error) {
 	t, e := tx.getTable(s.Table)
 	if e != nil {

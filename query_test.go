@@ -33,6 +33,7 @@ func TestPrimaryKeyAccessPaths(t *testing.T) {
 		}
 	}
 }
+
 func TestIndexScanEquivalence(t *testing.T) {
 	db := openTest(t)
 	execTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, n INTEGER, r REAL, s TEXT)")
@@ -55,6 +56,7 @@ func TestIndexScanEquivalence(t *testing.T) {
 		t.Fatal(plan)
 	}
 }
+
 func TestQueryOperatorsAndFunctions(t *testing.T) {
 	db := openTest(t)
 	execTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, n INTEGER, name TEXT)")
@@ -69,6 +71,7 @@ func TestQueryOperatorsAndFunctions(t *testing.T) {
 		}
 	}
 }
+
 func TestInvalidQueriesBindBeforeRows(t *testing.T) {
 	db := openTest(t)
 	execTest(t, db, "CREATE TABLE t (id INTEGER)")
@@ -79,6 +82,7 @@ func TestInvalidQueriesBindBeforeRows(t *testing.T) {
 		}
 	}
 }
+
 func TestStreamingAndOperationCancellation(t *testing.T) {
 	db := openTest(t)
 	execTest(t, db, "CREATE TABLE t (id INTEGER)")

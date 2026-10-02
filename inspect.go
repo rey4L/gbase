@@ -41,6 +41,7 @@ func literal(v Value) string {
 		return fmt.Sprint(x)
 	}
 }
+
 func (db *DB) Schema(ctx context.Context) ([]string, error) {
 	tx, e := db.Begin(ctx)
 	if e != nil {
@@ -132,6 +133,7 @@ func (db *DB) Schema(ctx context.Context) ([]string, error) {
 	}
 	return out, nil
 }
+
 func (tx *Tx) check() error {
 	owners := map[uint32]string{}
 	own := func(root uint32, name string) error {

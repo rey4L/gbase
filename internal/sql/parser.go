@@ -38,10 +38,12 @@ func (p *parser) next() Token {
 	}
 	return t
 }
+
 func (p *parser) is(s string) bool {
 	t := p.peek()
 	return (t.Kind == TokenKeyword || t.Kind == TokenSymbol) && t.Text == s
 }
+
 func (p *parser) take(s string) bool {
 	if p.err == nil && p.is(s) {
 		p.next()
@@ -49,16 +51,19 @@ func (p *parser) take(s string) bool {
 	}
 	return false
 }
+
 func (p *parser) fail(format string, args ...any) {
 	if p.err == nil {
 		p.err = &Error{Pos: p.peek().Pos, Message: fmt.Sprintf(format, args...)}
 	}
 }
+
 func (p *parser) expect(s string) {
 	if !p.take(s) {
 		p.fail("expected %s, found %q", s, p.peek().Text)
 	}
 }
+
 func (p *parser) ident() string {
 	if p.err != nil {
 		return ""
@@ -69,6 +74,7 @@ func (p *parser) ident() string {
 	}
 	return p.next().Text
 }
+
 func (p *parser) statement() Statement {
 	switch {
 	case p.take("CREATE"):
@@ -94,6 +100,7 @@ func (p *parser) statement() Statement {
 		return nil
 	}
 }
+
 func (p *parser) ifNotExists() bool {
 	if !p.take("IF") {
 		return false
@@ -102,6 +109,7 @@ func (p *parser) ifNotExists() bool {
 	p.expect("EXISTS")
 	return true
 }
+
 func (p *parser) ifExists() bool {
 	if !p.take("IF") {
 		return false
@@ -109,6 +117,7 @@ func (p *parser) ifExists() bool {
 	p.expect("EXISTS")
 	return true
 }
+
 func (p *parser) names(single bool) []string {
 	p.expect("(")
 	names := []string{p.ident()}
@@ -122,6 +131,7 @@ func (p *parser) names(single bool) []string {
 	p.expect(")")
 	return names
 }
+
 func (p *parser) create() Statement {
 	if p.take("TABLE") {
 		return p.createTable()
@@ -135,6 +145,7 @@ func (p *parser) create() Statement {
 	s.Columns = p.names(false)
 	return s
 }
+
 func (p *parser) drop() Statement {
 	if p.take("TABLE") {
 		s := &DropTable{IfExists: p.ifExists()}
@@ -147,6 +158,7 @@ func (p *parser) drop() Statement {
 	s.Name = p.ident()
 	return s
 }
+
 func (p *parser) createTable() Statement {
 	s := &CreateTable{IfNotExists: p.ifNotExists()}
 	s.Name = p.ident()
@@ -257,6 +269,7 @@ func (p *parser) createTable() Statement {
 	}
 	return s
 }
+
 func (p *parser) reference() *ForeignKey {
 	f := &ForeignKey{Table: p.ident()}
 	f.Column = p.names(true)[0]
@@ -285,6 +298,7 @@ func (p *parser) reference() *ForeignKey {
 	}
 	return f
 }
+
 func (p *parser) defaultLiteral() Expr {
 	sign := ""
 	if p.take("+") {
@@ -326,6 +340,7 @@ func (p *parser) defaultLiteral() Expr {
 	}
 	return &Literal{Value: v}
 }
+
 func (p *parser) insert() Statement {
 	p.expect("INTO")
 	s := &Insert{Table: p.ident()}
@@ -356,6 +371,7 @@ func (p *parser) insert() Statement {
 	}
 	return s
 }
+
 func (p *parser) tableRef() TableRef {
 	t := TableRef{Name: p.ident()}
 	if p.take("AS") {
@@ -365,6 +381,7 @@ func (p *parser) tableRef() TableRef {
 	}
 	return t
 }
+
 func (p *parser) selectStatement() Statement {
 	s := &Select{Distinct: p.take("DISTINCT")}
 	for p.err == nil {
@@ -441,6 +458,7 @@ func (p *parser) selectStatement() Statement {
 	}
 	return s
 }
+
 func (p *parser) exprList() []Expr {
 	result := []Expr{p.expression(1)}
 	for p.take(",") {
@@ -448,6 +466,7 @@ func (p *parser) exprList() []Expr {
 	}
 	return result
 }
+
 func (p *parser) bound() Expr {
 	if p.peek().Kind == TokenParameter {
 		return &Parameter{Index: p.next().Value.(int)}
@@ -461,6 +480,7 @@ func (p *parser) bound() Expr {
 	p.fail("LIMIT/OFFSET requires a nonnegative integer or parameter")
 	return nil
 }
+
 func (p *parser) update() Statement {
 	s := &Update{Table: p.ident()}
 	p.expect("SET")
@@ -478,6 +498,7 @@ func (p *parser) update() Statement {
 	}
 	return s
 }
+
 func (p *parser) deleteStatement() Statement {
 	p.expect("FROM")
 	s := &Delete{Table: p.ident()}
@@ -502,6 +523,7 @@ func precedence(op string) int {
 	}
 	return 0
 }
+
 func (p *parser) expression(min int) Expr {
 	if p.err != nil {
 		return nil
@@ -581,6 +603,7 @@ func (p *parser) expression(min int) Expr {
 	}
 	return left
 }
+
 func (p *parser) call(name string) Expr {
 	// Function availability and arity are checked by the binder.
 	c := &Call{Name: strings.ToUpper(name)}

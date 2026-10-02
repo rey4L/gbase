@@ -168,5 +168,6 @@ func (c *terminalCapture) Write(p []byte) (int, error) {
 	c.data = append(c.data, p...)
 	return len(p), nil
 }
+
 func (c *terminalCapture) text() string            { c.mu.Lock(); defer c.mu.Unlock(); return string(c.data) }
 func (c *terminalCapture) count(needle string) int { return strings.Count(c.text(), needle) }

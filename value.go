@@ -19,8 +19,10 @@ type Error struct {
 func (e *Error) Error() string                    { return e.Code + ": " + e.Message }
 func fail(code, format string, args ...any) error { return &Error{code, fmt.Sprintf(format, args...)} }
 
-var ErrClosed = errors.New("gbase: closed")
-var ErrBusy = errors.New("gbase: active cursor")
+var (
+	ErrClosed = errors.New("gbase: closed")
+	ErrBusy   = errors.New("gbase: active cursor")
+)
 
 func normalize(v any) (Value, error) {
 	switch x := v.(type) {
@@ -61,6 +63,7 @@ func normalize(v any) (Value, error) {
 	}
 	return nil, fail("type", "unsupported parameter %T or out-of-range value", v)
 }
+
 func encodeRecord(values []Value) ([]byte, error) {
 	var b bytes.Buffer
 	binary.Write(&b, binary.BigEndian, uint32(len(values)))
@@ -91,6 +94,7 @@ func encodeRecord(values []Value) ([]byte, error) {
 	}
 	return b.Bytes(), nil
 }
+
 func decodeRecord(data []byte) ([]Value, error) {
 	r := bytes.NewReader(data)
 	var n uint32
@@ -138,17 +142,20 @@ func decodeRecord(data []byte) ([]Value, error) {
 	}
 	return out, nil
 }
+
 func rowKey(id int64) []byte {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, uint64(id)^(1<<63))
 	return b
 }
+
 func keyRow(b []byte) (int64, error) {
 	if len(b) != 8 {
 		return 0, fail("corrupt", "invalid row key")
 	}
 	return int64(binary.BigEndian.Uint64(b) ^ (1 << 63)), nil
 }
+
 func indexPrefix(v Value) ([]byte, error) {
 	b := []byte{}
 	var fixed [8]byte
@@ -186,6 +193,7 @@ func indexPrefix(v Value) ([]byte, error) {
 	}
 	return b, nil
 }
+
 func escaped(dst, src []byte) []byte {
 	for _, x := range src {
 		if x == 0 {
@@ -196,6 +204,7 @@ func escaped(dst, src []byte) []byte {
 	}
 	return append(dst, 0, 0)
 }
+
 func prefixEnd(b []byte) []byte {
 	out := bytes.Clone(b)
 	for i := len(out) - 1; i >= 0; i-- {

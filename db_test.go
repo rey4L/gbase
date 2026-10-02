@@ -21,6 +21,7 @@ func openTest(t *testing.T) *DB {
 	t.Cleanup(func() { db.Close() })
 	return db
 }
+
 func execTest(t *testing.T, db *DB, q string, args ...any) Result {
 	t.Helper()
 	r, e := db.Exec(bg, q, args...)
@@ -29,6 +30,7 @@ func execTest(t *testing.T, db *DB, q string, args ...any) Result {
 	}
 	return r
 }
+
 func queryTest(t *testing.T, db *DB, q string, args ...any) [][]Value {
 	t.Helper()
 	r, e := db.Query(bg, q, args...)
@@ -45,6 +47,7 @@ func queryTest(t *testing.T, db *DB, q string, args ...any) [][]Value {
 	}
 	return out
 }
+
 func TestCRUDConstraintsAndRecovery(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
 	db, e := Open(path)
@@ -86,6 +89,7 @@ func TestCRUDConstraintsAndRecovery(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
 func TestStatementAndTransactionAtomicity(t *testing.T) {
 	db := openTest(t)
 	execTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, n TEXT UNIQUE)")
@@ -121,6 +125,7 @@ func TestStatementAndTransactionAtomicity(t *testing.T) {
 		t.Fatal("DDL rollback failed")
 	}
 }
+
 func TestJoinsGroupsAndNull(t *testing.T) {
 	db := openTest(t)
 	execTest(t, db, "CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT)")
@@ -141,6 +146,7 @@ func TestJoinsGroupsAndNull(t *testing.T) {
 		t.Fatalf("NULL: %#v", got)
 	}
 }
+
 func TestLargeValuesAndReuse(t *testing.T) {
 	db := openTest(t)
 	execTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT)")
@@ -161,6 +167,7 @@ func TestLargeValuesAndReuse(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
 func TestOwnershipAndCancellation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "t.db")
 	db, e := Open(path)
@@ -200,6 +207,7 @@ func TestOwnershipAndCancellation(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
 func TestBindingAndTypes(t *testing.T) {
 	db := openTest(t)
 	execTest(t, db, "CREATE TABLE t (id INTEGER, r REAL)")
@@ -220,6 +228,7 @@ func TestBindingAndTypes(t *testing.T) {
 		t.Fatal("overflow accepted")
 	}
 }
+
 func TestConcurrentCallers(t *testing.T) {
 	db := openTest(t)
 	execTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, n INTEGER)")
@@ -247,6 +256,7 @@ func TestConcurrentCallers(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
 func BenchmarkIndexedLookup(b *testing.B) {
 	db, e := Open(filepath.Join(b.TempDir(), "b.db"))
 	if e != nil {
@@ -294,6 +304,7 @@ func TestPrimaryDefaultsAndExhaustion(t *testing.T) {
 	}
 	queryTest(t, db, "SELECT * FROM t")
 }
+
 func TestDuplicateForeignKeysAndSchemaReplay(t *testing.T) {
 	db := openTest(t)
 	execTest(t, db, "CREATE TABLE z_parent (id INTEGER PRIMARY KEY)")
@@ -314,6 +325,7 @@ func TestDuplicateForeignKeysAndSchemaReplay(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
 func TestEmptyMutationBinding(t *testing.T) {
 	db := openTest(t)
 	execTest(t, db, "CREATE TABLE t (id INTEGER)")
@@ -323,6 +335,7 @@ func TestEmptyMutationBinding(t *testing.T) {
 		}
 	}
 }
+
 func TestCloseAgainstQueriesAndInspection(t *testing.T) {
 	for i := 0; i < 15; i++ {
 		db := openTest(t)

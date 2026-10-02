@@ -8,13 +8,16 @@ import (
 	"github.com/rey4L/gbase/internal/storage"
 )
 
-type reference struct{ Table, Column string }
-type column struct {
-	Name, Type               string
-	Primary, Unique, NotNull bool
-	Default                  []byte
-	Ref                      *reference
-}
+type (
+	reference struct{ Table, Column string }
+	column    struct {
+		Name, Type               string
+		Primary, Unique, NotNull bool
+		Default                  []byte
+		Ref                      *reference
+	}
+)
+
 type table struct {
 	Name      string
 	Columns   []column
@@ -42,6 +45,7 @@ func (t *table) col(name string) int {
 	}
 	return -1
 }
+
 func (tx *Tx) loadCatalog() error {
 	if tx.pages.Root() == 0 {
 		tx.cat = emptyCatalog()
@@ -64,6 +68,7 @@ func (tx *Tx) loadCatalog() error {
 	}
 	return tx.validateCatalog()
 }
+
 func (tx *Tx) saveCatalog() error {
 	root := tx.pages.Root()
 	if root == 0 {
@@ -91,12 +96,14 @@ func (tx *Tx) saveCatalog() error {
 	tx.pages.SetRoot(tr.Root)
 	return nil
 }
+
 func cloneCatalog(c *catalog) *catalog {
 	b, _ := json.Marshal(c)
 	out := emptyCatalog()
 	json.Unmarshal(b, out)
 	return out
 }
+
 func (tx *Tx) getTable(name string) (*table, error) {
 	t := tx.cat.Tables[canon(name)]
 	if t == nil {

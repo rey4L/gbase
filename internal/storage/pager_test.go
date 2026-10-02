@@ -18,6 +18,7 @@ func openTest(t *testing.T, path string) *Pager {
 	t.Cleanup(func() { p.Close() })
 	return p
 }
+
 func beginTest(t *testing.T, p *Pager) *Tx {
 	t.Helper()
 	x, e := p.Begin()
@@ -26,6 +27,7 @@ func beginTest(t *testing.T, p *Pager) *Tx {
 	}
 	return x
 }
+
 func must(t *testing.T, e error) {
 	t.Helper()
 	if e != nil {
@@ -225,6 +227,7 @@ func TestLock(t *testing.T) {
 	must(t, p.Close())
 	openTest(t, path)
 }
+
 func TestLockChild(t *testing.T) {
 	if path := os.Getenv("GBASE_LOCK_PATH"); path != "" {
 		if p, e := Open(path); !errors.Is(e, ErrLocked) {
@@ -249,6 +252,7 @@ func seed(t *testing.T, path string) *Pager {
 	must(t, x.Commit())
 	return p
 }
+
 func change(t *testing.T, p *Pager) *Tx {
 	t.Helper()
 	x := beginTest(t, p)
@@ -262,6 +266,7 @@ func change(t *testing.T, p *Pager) *Tx {
 	x.SetRoot(id)
 	return x
 }
+
 func TestCommitFaultRecovery(t *testing.T) {
 	for _, point := range faultPoints {
 		t.Run(point, func(t *testing.T) {
@@ -330,6 +335,7 @@ func TestCrashRecovery(t *testing.T) {
 		})
 	}
 }
+
 func TestCrashChild(t *testing.T) {
 	if path := os.Getenv("GBASE_CRASH_PATH"); path != "" {
 		p := openTest(t, path)
@@ -409,7 +415,7 @@ func TestCorruption(t *testing.T) {
 				put(b, 32, checksum(b[PageSize:]))
 				seal(b[:PageSize])
 			}
-			must(t, os.WriteFile(target, b, 0600))
+			must(t, os.WriteFile(target, b, 0o600))
 			before, e := os.ReadFile(path)
 			must(t, e)
 			q, e := Open(path)
@@ -463,7 +469,7 @@ func TestIncompleteJournal(t *testing.T) {
 			case "partial-body":
 				b = append(b, 1, 2, 3)
 			}
-			must(t, os.WriteFile(path+"-journal", b, 0600))
+			must(t, os.WriteFile(path+"-journal", b, 0o600))
 			p = openTest(t, path)
 			x := beginTest(t, p)
 			readEquals(t, x, 1, 11)
@@ -474,6 +480,7 @@ func TestIncompleteJournal(t *testing.T) {
 		})
 	}
 }
+
 func TestFreePages(t *testing.T) {
 	p := openTest(t, filepath.Join(t.TempDir(), "db"))
 	x := beginTest(t, p)
@@ -499,6 +506,7 @@ func TestFreePages(t *testing.T) {
 		t.Fatal("free list not persisted")
 	}
 }
+
 func TestSymlinkRecovery(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "db")
 	p := seed(t, path)
@@ -527,7 +535,7 @@ func TestPageChecksum(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "db")
 	p := seed(t, path)
 	must(t, p.Close())
-	f, e := os.OpenFile(path, os.O_RDWR, 0600)
+	f, e := os.OpenFile(path, os.O_RDWR, 0o600)
 	must(t, e)
 	must(t, writeAt(f, []byte{99}, PageSize+100))
 	must(t, f.Close())

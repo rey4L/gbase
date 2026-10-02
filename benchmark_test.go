@@ -34,6 +34,7 @@ func benchmarkData(b *testing.B, indexed bool) *DB {
 	}
 	return db
 }
+
 func BenchmarkSecondaryLookup(b *testing.B) {
 	for _, indexed := range []bool{false, true} {
 		name := "scan"
@@ -59,6 +60,7 @@ func BenchmarkSecondaryLookup(b *testing.B) {
 		})
 	}
 }
+
 func BenchmarkFullScan(b *testing.B) {
 	db := benchmarkData(b, false)
 	b.ReportAllocs()
@@ -76,6 +78,7 @@ func BenchmarkFullScan(b *testing.B) {
 		}
 	}
 }
+
 func BenchmarkCommitBatch(b *testing.B) {
 	db, e := Open(filepath.Join(b.TempDir(), "batch.db"))
 	if e != nil {

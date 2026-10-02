@@ -28,6 +28,7 @@ func newTestTree(t *testing.T) (*Pager, *Tree) {
 	}
 	return p, &Tree{Tx: tx, Root: root}
 }
+
 func assertTree(t *testing.T, tr *Tree, want map[string][]byte) {
 	t.Helper()
 	pages, e := tr.Pages()
@@ -75,6 +76,7 @@ func assertTree(t *testing.T, tr *Tree, want map[string][]byte) {
 		t.Fatalf("scan length %d want %d", i, len(keys))
 	}
 }
+
 func TestBTreeRandomized(t *testing.T) {
 	_, tr := newTestTree(t)
 	rng := rand.New(rand.NewSource(781))
@@ -137,6 +139,7 @@ func TestBTreeRandomized(t *testing.T) {
 		t.Fatalf("empty ownership: %v %v", pages, e)
 	}
 }
+
 func TestBTreeDeepSplitsMerges(t *testing.T) {
 	_, tr := newTestTree(t)
 	rng := rand.New(rand.NewSource(92))
@@ -185,6 +188,7 @@ func TestBTreeDeepSplitsMerges(t *testing.T) {
 	}
 	assertTree(t, tr, want)
 }
+
 func TestBTreeReopenOverflowOwnership(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reopen.db")
 	p, e := Open(path)
@@ -273,6 +277,7 @@ func TestBTreeReopenOverflowOwnership(t *testing.T) {
 	fresh := &Tree{Tx: tx, Root: newRoot}
 	assertTree(t, fresh, map[string][]byte{})
 }
+
 func TestBTreeBinaryScanBounds(t *testing.T) {
 	_, tr := newTestTree(t)
 	keys := [][]byte{{}, {0}, {0, 0}, {0, 255}, {1}, {1, 0}, {255}, {255, 255}}
@@ -307,6 +312,7 @@ func TestBTreeBinaryScanBounds(t *testing.T) {
 		}
 	}
 }
+
 func TestBTreeKeyLimit(t *testing.T) {
 	_, tr := newTestTree(t)
 	key := make([]byte, MaxKeySize+1)
@@ -325,6 +331,7 @@ func TestBTreeKeyLimit(t *testing.T) {
 		t.Fatalf("max key: %v %v", ok, e)
 	}
 }
+
 func TestBTreeCorruption(t *testing.T) {
 	for _, mode := range []string{"checksum", "slot", "leaf-cycle", "overflow-cycle", "overflow-size", "shared-child", "separator", "child-cycle"} {
 		t.Run(mode, func(t *testing.T) {
@@ -414,6 +421,7 @@ func TestBTreeCorruption(t *testing.T) {
 		})
 	}
 }
+
 func TestBTreeOverflowBoundaries(t *testing.T) {
 	_, tr := newTestTree(t)
 	sizes := []int{0, 1, inlineLimit, inlineLimit + 1, treeEnd - treeHeader, treeEnd - treeHeader + 1, 2 * (treeEnd - treeHeader), 2*(treeEnd-treeHeader) + 1, 1 << 20}

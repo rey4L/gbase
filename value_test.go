@@ -23,6 +23,7 @@ func TestRecordCodec(t *testing.T) {
 		}
 	}
 }
+
 func TestOrderedKeys(t *testing.T) {
 	sets := [][]Value{{int64(math.MinInt64), int64(-1), int64(0), int64(1), int64(math.MaxInt64)}, {float64(-1e100), float64(-1), float64(0), float64(1), float64(1e100)}, {"", "\x00", "a", "a\x00", "aa", "z"}, {[]byte{}, []byte{0}, []byte{1}, []byte{255}}}
 	for _, set := range sets {
@@ -39,6 +40,7 @@ func TestOrderedKeys(t *testing.T) {
 		}
 	}
 }
+
 func FuzzDecodeRecord(f *testing.F) {
 	b, _ := encodeRecord([]Value{nil, int64(1), "test", []byte{0, 1}})
 	f.Add(b)

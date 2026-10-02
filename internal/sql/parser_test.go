@@ -16,6 +16,7 @@ func mustParse(t *testing.T, input string) Statement {
 	}
 	return s
 }
+
 func TestStatements(t *testing.T) {
 	tests := []struct {
 		input string

@@ -23,6 +23,7 @@ type evalEnv struct {
 func rowEnv(t *table, values []Value) evalEnv {
 	return evalEnv{bindings: []evalBinding{{name: t.Name, table: t, values: values}}}
 }
+
 func matches(x sql.Expr, t *table, values []Value, args []Value) (bool, error) {
 	env := rowEnv(t, values)
 	if e := bindExpr(x, env, false); e != nil {
@@ -37,6 +38,7 @@ func matches(x sql.Expr, t *table, values []Value, args []Value) (bool, error) {
 	}
 	return truth(v)
 }
+
 func resolveColumn(c *sql.Column, env evalEnv) (int, int, error) {
 	bi, ci := -1, -1
 	for i, b := range env.bindings {
@@ -57,6 +59,7 @@ func resolveColumn(c *sql.Column, env evalEnv) (int, int, error) {
 	}
 	return bi, ci, nil
 }
+
 func aggregate(name string) bool {
 	switch strings.ToUpper(name) {
 	case "COUNT", "SUM", "AVG", "MIN", "MAX":
@@ -64,6 +67,7 @@ func aggregate(name string) bool {
 	}
 	return false
 }
+
 func bindExpr(x sql.Expr, env evalEnv, allowAggregate bool) error {
 	if x == nil {
 		return nil
@@ -116,6 +120,7 @@ func bindExpr(x sql.Expr, env evalEnv, allowAggregate bool) error {
 	}
 	return nil
 }
+
 func truth(v Value) (bool, error) {
 	switch x := v.(type) {
 	case nil:
@@ -128,6 +133,7 @@ func truth(v Value) (bool, error) {
 		return false, fail("type", "boolean requires number")
 	}
 }
+
 func boolValue(b bool) Value {
 	if b {
 		return int64(1)
@@ -184,6 +190,7 @@ func compareValues(a, b Value) (int, error) {
 	}
 	return 0, fail("type", "cannot compare %T and %T", a, b)
 }
+
 func compareNumbers(i int64, f float64) int {
 	a := new(big.Rat).SetInt64(i)
 	b := new(big.Rat).SetFloat64(f)
@@ -195,6 +202,7 @@ func compareNumbers(i int64, f float64) int {
 	}
 	return a.Cmp(b)
 }
+
 func numeric(v Value) (float64, bool) {
 	switch x := v.(type) {
 	case int64:
@@ -204,6 +212,7 @@ func numeric(v Value) (float64, bool) {
 	}
 	return 0, false
 }
+
 func arithmetic(op string, a, b Value) (Value, error) {
 	if a == nil || b == nil {
 		return nil, nil
@@ -269,6 +278,7 @@ func arithmetic(op string, a, b Value) (Value, error) {
 	}
 	return z, nil
 }
+
 func eval(x sql.Expr, env evalEnv, args []Value) (Value, error) {
 	if x == nil {
 		return nil, nil
@@ -455,6 +465,7 @@ func eval(x sql.Expr, env evalEnv, args []Value) (Value, error) {
 	}
 	return nil, fail("query", "unsupported expression %T", x)
 }
+
 func evalAggregate(c *sql.Call, env evalEnv, args []Value) (Value, error) {
 	if env.group == nil {
 		return nil, fail("query", "aggregate outside group")
@@ -517,6 +528,7 @@ func evalAggregate(c *sql.Call, env evalEnv, args []Value) (Value, error) {
 	}
 	return result, nil
 }
+
 func exprName(x sql.Expr) string {
 	switch e := x.(type) {
 	case *sql.Column:

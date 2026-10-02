@@ -9,19 +9,24 @@ import (
 	"sort"
 )
 
-const MaxKeySize = 1024
-const treeHeader = 24
-const treeEnd = PageSize - 4
-const inlineLimit = 512
-const noPage = ^uint32(0)
+const (
+	MaxKeySize  = 1024
+	treeHeader  = 24
+	treeEnd     = PageSize - 4
+	inlineLimit = 512
+	noPage      = ^uint32(0)
+)
+
 const (
 	leafPage     byte = 1
 	branchPage   byte = 2
 	overflowPage byte = 3
 )
 
-var ErrTreeCorrupt = errors.New("corrupt B+ tree")
-var ErrValueTooLarge = errors.New("B+ tree value exceeds uint32 length")
+var (
+	ErrTreeCorrupt   = errors.New("corrupt B+ tree")
+	ErrValueTooLarge = errors.New("B+ tree value exceeds uint32 length")
+)
 
 // KeyTooLargeError reports a key that cannot fit within the tree's key limit.
 type KeyTooLargeError struct{ Size int }
@@ -50,12 +55,14 @@ type treeNode struct {
 func corrupt(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", ErrTreeCorrupt, fmt.Sprintf(format, a...))
 }
+
 func checkKey(k []byte) error {
 	if len(k) > MaxKeySize {
 		return &KeyTooLargeError{len(k)}
 	}
 	return nil
 }
+
 func nodeSize(n *treeNode) int {
 	s := treeHeader
 	for _, r := range n.records {
@@ -69,6 +76,7 @@ func nodeSize(n *treeNode) int {
 	}
 	return s
 }
+
 func treeChecksum(p []byte) uint32 {
 	h := crc32.NewIEEE()
 	h.Write(p[:16])
@@ -76,6 +84,7 @@ func treeChecksum(p []byte) uint32 {
 	h.Write(p[20:treeEnd])
 	return h.Sum32()
 }
+
 func pageBytes(kind byte) []byte {
 	p := make([]byte, PageSize)
 	copy(p, "GBT1")
@@ -97,6 +106,7 @@ func (t *Tree) readPage(id uint32, kind byte) ([]byte, error) {
 	}
 	return p, nil
 }
+
 func (t *Tree) readNode(id uint32) (*treeNode, error) {
 	p, e := t.readPage(id, 0)
 	if e != nil {
@@ -160,6 +170,7 @@ func (t *Tree) readNode(id uint32) (*treeNode, error) {
 	}
 	return n, nil
 }
+
 func (t *Tree) writeNode(id uint32, n *treeNode) error {
 	if nodeSize(n) > treeEnd {
 		return errors.New("B+ tree node does not fit")
@@ -196,6 +207,7 @@ func (t *Tree) writeNode(id uint32, n *treeNode) error {
 	sealTreePage(p)
 	return t.Tx.Write(id, p)
 }
+
 func CreateTree(tx *Tx) (uint32, error) {
 	if tx == nil {
 		return 0, errors.New("nil transaction")
@@ -210,6 +222,7 @@ func CreateTree(tx *Tx) (uint32, error) {
 	}
 	return id, nil
 }
+
 func childIndex(n *treeNode, k []byte) int {
 	i := sort.Search(len(n.records), func(i int) bool { return bytes.Compare(n.records[i].key, k) > 0 }) - 1
 	if i < 0 {
@@ -217,9 +230,11 @@ func childIndex(n *treeNode, k []byte) int {
 	}
 	return i
 }
+
 func recordIndex(n *treeNode, k []byte) int {
 	return sort.Search(len(n.records), func(i int) bool { return bytes.Compare(n.records[i].key, k) >= 0 })
 }
+
 func (t *Tree) find(k []byte) (uint32, *treeNode, error) {
 	id := t.Root
 	seen := map[uint32]bool{}
@@ -238,6 +253,7 @@ func (t *Tree) find(k []byte) (uint32, *treeNode, error) {
 		id = n.records[childIndex(n, k)].child
 	}
 }
+
 func (t *Tree) overflow(r treeRecord, visit func(uint32) error) ([]byte, error) {
 	if r.overflow == noPage {
 		return bytes.Clone(r.value), nil
@@ -279,6 +295,7 @@ func (t *Tree) overflow(r treeRecord, visit func(uint32) error) ([]byte, error) 
 	}
 	return out, nil
 }
+
 func (t *Tree) Get(key []byte) ([]byte, bool, error) {
 	if e := checkKey(key); e != nil {
 		return nil, false, e
@@ -294,6 +311,7 @@ func (t *Tree) Get(key []byte) ([]byte, bool, error) {
 	v, e := t.overflow(n.records[i], nil)
 	return v, e == nil, e
 }
+
 func (t *Tree) newRecord(k, v []byte) (treeRecord, error) {
 	r := treeRecord{key: bytes.Clone(k), size: uint32(len(v)), overflow: noPage}
 	if len(v) <= inlineLimit {
@@ -330,6 +348,7 @@ func (t *Tree) newRecord(k, v []byte) (treeRecord, error) {
 	}
 	return r, nil
 }
+
 func (t *Tree) freeValue(r treeRecord) error {
 	var ids []uint32
 	_, e := t.overflow(r, func(id uint32) error { ids = append(ids, id); return nil })
@@ -343,12 +362,14 @@ func (t *Tree) freeValue(r treeRecord) error {
 	}
 	return nil
 }
+
 func minimum(n *treeNode) []byte {
 	if len(n.records) == 0 {
 		return nil
 	}
 	return bytes.Clone(n.records[0].key)
 }
+
 func splitIndex(n *treeNode) int {
 	best := 0
 	gap := int(^uint(0) >> 1)
@@ -368,6 +389,7 @@ func splitIndex(n *treeNode) int {
 	}
 	return best
 }
+
 func (t *Tree) split(id uint32, n *treeNode) (*treeRecord, error) {
 	i := splitIndex(n)
 	if i == 0 {
@@ -390,12 +412,14 @@ func (t *Tree) split(id uint32, n *treeNode) (*treeRecord, error) {
 	}
 	return &treeRecord{key: minimum(right), child: rightID}, nil
 }
+
 func insertRecord(rs []treeRecord, i int, r treeRecord) []treeRecord {
 	rs = append(rs, treeRecord{})
 	copy(rs[i+1:], rs[i:])
 	rs[i] = r
 	return rs
 }
+
 func (t *Tree) put(id uint32, k, v []byte, seen map[uint32]bool) ([]byte, *treeRecord, error) {
 	if seen[id] {
 		return nil, nil, corrupt("node cycle")
@@ -436,6 +460,7 @@ func (t *Tree) put(id uint32, k, v []byte, seen map[uint32]bool) ([]byte, *treeR
 	}
 	return minimum(n), nil, t.writeNode(id, n)
 }
+
 func (t *Tree) Put(key, value []byte) error {
 	if e := checkKey(key); e != nil {
 		return e
@@ -460,6 +485,7 @@ func (t *Tree) Put(key, value []byte) error {
 	}
 	return nil
 }
+
 func (t *Tree) rebalance(parent *treeNode, i int) error {
 	if len(parent.records) < 2 {
 		return nil
@@ -511,6 +537,7 @@ func (t *Tree) rebalance(parent *treeNode, i int) error {
 	}
 	return t.writeNode(bID, b)
 }
+
 func (t *Tree) delete(id uint32, k []byte, seen map[uint32]bool) (*treeNode, *treeRecord, error) {
 	if seen[id] {
 		return nil, nil, corrupt("node cycle")
@@ -551,6 +578,7 @@ func (t *Tree) delete(id uint32, k []byte, seen map[uint32]bool) (*treeNode, *tr
 	}
 	return n, nil, t.writeNode(id, n)
 }
+
 func (t *Tree) Delete(key []byte) error {
 	if e := checkKey(key); e != nil {
 		return e
@@ -612,6 +640,7 @@ func (t *Tree) Scan(start, end []byte) (*Cursor, error) {
 	}
 	return &Cursor{tree: t, node: n, index: recordIndex(n, start), end: bytes.Clone(end), bounded: end != nil, seen: map[uint32]bool{id: true}, done: end != nil && bytes.Compare(start, end) >= 0}, nil
 }
+
 func (c *Cursor) Next() bool {
 	c.key = nil
 	c.value = nil

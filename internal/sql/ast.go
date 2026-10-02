@@ -7,13 +7,16 @@ type Statement interface{ statement() }
 // Expr is a SQL expression. All implementations are pointers.
 type Expr interface{ expr() }
 
-type Literal struct{ Value any }
-type Column struct{ Table, Name string }
-type Parameter struct{ Index int }
-type Unary struct {
-	Op string
-	X  Expr
-}
+type (
+	Literal   struct{ Value any }
+	Column    struct{ Table, Name string }
+	Parameter struct{ Index int }
+	Unary     struct {
+		Op string
+		X  Expr
+	}
+)
+
 type Binary struct {
 	Op          string
 	Left, Right Expr
