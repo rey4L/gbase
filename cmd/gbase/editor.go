@@ -206,7 +206,7 @@ func (e *lineEditor) readLine() (string, error) {
 				return "", err
 			}
 		case '\t':
-			for range 5 {
+			for range 4 {
 				line.insert(' ')
 			}
 		default:
