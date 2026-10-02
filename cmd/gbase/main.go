@@ -11,13 +11,14 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 
 	"github.com/rey4L/gbase"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	info, err := os.Stdin.Stat()
 	interactive := err == nil && info.Mode()&os.ModeCharDevice != 0
@@ -61,13 +62,27 @@ func run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer
 	}()
 	readCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	var editor *lineEditor
+	var restore func() error
+	if interactive {
+		editor, restore, err = attachTerminal(readCtx, in, out)
+		if err != nil {
+			fmt.Fprintln(stderr, "error:", err)
+			return 1
+		}
+		if editor != nil {
+			in = editor
+		}
+	}
 	type input struct {
 		statement string
 		err       error
 	}
 	requests := make(chan struct{})
 	inputs := make(chan input)
+	readDone := make(chan struct{})
 	go func() {
+		defer close(readDone)
 		sp := splitter{r: bufio.NewReader(in)}
 		for {
 			select {
@@ -86,8 +101,33 @@ func run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer
 			}
 		}
 	}()
+	defer func() {
+		cancel()
+		if restore != nil {
+			// Stop terminal reads before restoring settings. This defer belongs in
+			// run: main's os.Exit does not execute main's deferred functions.
+			<-readDone
+			if err := restore(); err != nil {
+				fmt.Fprintln(stderr, "error:", err)
+				code = 1
+			}
+		}
+	}()
+	reportCancellation := func() {
+		cancel()
+		if editor != nil {
+			// Finish redraws before printing the cancellation message on a new row.
+			<-readDone
+			fmt.Fprintln(out)
+		}
+		fmt.Fprintln(stderr, "error:", ctx.Err())
+	}
 	for {
-		if interactive {
+		if editor != nil {
+			// The request channel hands prompt state to the input goroutine.
+			editor.continuation = false
+		}
+		if interactive && editor == nil {
 			if _, err := fmt.Fprint(out, "gbase> "); err != nil {
 				fmt.Fprintln(stderr, "error:", err)
 				return 1
@@ -95,14 +135,14 @@ func run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer
 		}
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(stderr, "error:", ctx.Err())
+			reportCancellation()
 			return 1
 		case requests <- struct{}{}:
 		}
 		var item input
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(stderr, "error:", ctx.Err())
+			reportCancellation()
 			return 1
 		case item = <-inputs:
 		}
