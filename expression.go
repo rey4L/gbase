@@ -3,10 +3,11 @@ package gbase
 import (
 	"bytes"
 	"fmt"
-	"github.com/rey4L/gbase/internal/sql"
 	"math"
 	"math/big"
 	"strings"
+
+	"github.com/rey4L/gbase/internal/sql"
 )
 
 type evalBinding struct {

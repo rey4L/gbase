@@ -2,11 +2,12 @@ package gbase
 
 import (
 	"context"
-	"github.com/rey4L/gbase/internal/sql"
-	"github.com/rey4L/gbase/internal/storage"
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/rey4L/gbase/internal/sql"
+	"github.com/rey4L/gbase/internal/storage"
 )
 
 type queryResult struct {
@@ -24,6 +25,7 @@ type queryProgram struct {
 	items         []sql.SelectItem
 	ops           []queryOp
 	idx           *index
+	primary       bool
 	start, end    []byte
 	limit, offset int64
 	grouped       bool
@@ -130,7 +132,7 @@ func (tx *Tx) compileSelect(s *sql.Select, args []Value) (*queryProgram, error) 
 	} else if len(s.Joins) > 0 {
 		return nil, fail("query", "JOIN requires FROM")
 	}
-	for i, j := range s.Joins {
+	for _, j := range s.Joins {
 		if e := add(j.Table); e != nil {
 			return nil, e
 		}
@@ -140,7 +142,6 @@ func (tx *Tx) compileSelect(s *sql.Select, args []Value) (*queryProgram, error) 
 		if e := bindExpr(j.On, p.env, false); e != nil {
 			return nil, e
 		}
-		_ = i
 	}
 	for _, item := range s.Columns {
 		if star, ok := item.Expr.(*sql.Star); ok {
@@ -299,7 +300,16 @@ func (p *queryProgram) chooseIndex(tx *Tx, args []Value) {
 	}
 	flatten(p.stmt.Where)
 	binding := p.env.bindings[0]
-	for _, idx := range tx.indexes(binding.table) {
+	candidates := tx.indexes(binding.table)
+	var primary *index
+	for _, c := range binding.table.Columns {
+		if c.Primary && c.Type == "INTEGER" {
+			primary = &index{Name: binding.table.Name + " PRIMARY KEY", Table: binding.table.Name, Column: c.Name, Root: binding.table.Root, Unique: true}
+			candidates = append([]*index{primary}, candidates...)
+			break
+		}
+	}
+	for _, idx := range candidates {
 		for _, term := range terms {
 			b, ok := term.(*sql.Binary)
 			if !ok {
@@ -355,11 +365,19 @@ func (p *queryProgram) chooseIndex(tx *Tx, args []Value) {
 			}
 			typeStart := prefix[:1]
 			typeEnd := prefixEnd(typeStart)
+			if idx == primary {
+				prefix = rowKey(v.(int64))
+				typeStart = nil
+				typeEnd = nil
+			}
 			switch op {
 			case "=":
 				p.start, p.end = prefix, prefixEnd(prefix)
 			case ">":
 				p.start, p.end = prefixEnd(prefix), typeEnd
+				if idx == primary && p.start == nil {
+					p.start = append(append([]byte(nil), prefix...), 0)
+				}
 			case ">=":
 				p.start, p.end = prefix, typeEnd
 			case "<":
@@ -370,6 +388,7 @@ func (p *queryProgram) chooseIndex(tx *Tx, args []Value) {
 				continue
 			}
 			p.idx = idx
+			p.primary = idx == primary
 			return
 		}
 	}
@@ -385,10 +404,11 @@ func (p *queryProgram) columns() []string {
 	return out
 }
 func (tx *Tx) sourceRows(p *queryProgram) (func() (evalEnv, bool, error), error) {
+	ctx := tx.ctx
 	if len(p.env.bindings) == 0 {
 		done := false
 		return func() (evalEnv, bool, error) {
-			if e := tx.queryContext(); e != nil {
+			if e := ctx.Err(); e != nil {
 				return evalEnv{}, false, e
 			}
 			if done {
@@ -401,7 +421,7 @@ func (tx *Tx) sourceRows(p *queryProgram) (func() (evalEnv, bool, error), error)
 	binding := p.env.bindings[0]
 	tr := storage.Tree{Tx: tx.pages, Root: binding.table.Root}
 	tree := tr
-	if p.idx != nil {
+	if p.idx != nil && !p.primary {
 		tree = storage.Tree{Tx: tx.pages, Root: p.idx.Root}
 	}
 	cursor, e := tree.Scan(p.start, p.end)
@@ -409,14 +429,14 @@ func (tx *Tx) sourceRows(p *queryProgram) (func() (evalEnv, bool, error), error)
 		return nil, e
 	}
 	return func() (evalEnv, bool, error) {
-		if e := tx.queryContext(); e != nil {
+		if e := ctx.Err(); e != nil {
 			return evalEnv{}, false, e
 		}
 		if !cursor.Next() {
 			return evalEnv{}, false, cursor.Err()
 		}
 		data := cursor.Value()
-		if p.idx != nil {
+		if p.idx != nil && !p.primary {
 			var ok bool
 			var e error
 			data, ok, e = tr.Get(data)
@@ -478,11 +498,12 @@ func (tx *Tx) executeSelect(s *sql.Select, args []Value) (*queryResult, error) {
 		return nil, e
 	}
 	q := &queryResult{columns: p.columns()}
+	ctx := tx.ctx
 	if len(s.Joins) == 0 && !p.grouped && !s.Distinct && len(s.OrderBy) == 0 {
 		var skipped, emitted int64
 		q.next = func() ([]Value, bool, error) {
 			for {
-				if e := tx.queryContext(); e != nil {
+				if e := ctx.Err(); e != nil {
 					return nil, false, e
 				}
 				if p.limit >= 0 && emitted >= p.limit {
