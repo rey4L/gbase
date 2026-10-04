@@ -22,6 +22,7 @@ func fail(code, format string, args ...any) error { return &Error{code, fmt.Spri
 var (
 	ErrClosed = errors.New("gbase: closed")
 	ErrBusy   = errors.New("gbase: active cursor")
+	ErrLocked = errors.New("gbase: database is locked")
 )
 
 func normalize(v any) (Value, error) {

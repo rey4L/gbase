@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/rey4L/gbase/internal/sql"
 	"github.com/rey4L/gbase/internal/storage"
@@ -16,6 +18,7 @@ type DB struct {
 	mu     sync.Mutex
 	closed bool
 	active *Tx
+	busy   atomic.Int64 // nanoseconds Begin waits for the database before ErrLocked; 0 waits for ctx
 }
 type Tx struct {
 	db     *DB
@@ -64,9 +67,17 @@ func (db *DB) Begin(ctx context.Context) (*Tx, error) {
 	if e := ctx.Err(); e != nil {
 		return nil, e
 	}
+	var timeout <-chan time.Time
+	if d := time.Duration(db.busy.Load()); d > 0 {
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		timeout = timer.C
+	}
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	case <-timeout:
+		return nil, ErrLocked
 	case <-db.gate:
 	}
 	if e := ctx.Err(); e != nil {
@@ -93,6 +104,12 @@ func (db *DB) Begin(ctx context.Context) (*Tx, error) {
 	db.active = tx
 	return tx, nil
 }
+
+// SetBusyTimeout bounds how long starting a transaction, including the
+// implicit one in DB.Exec and DB.Query, waits for another transaction to
+// finish before failing with ErrLocked. Zero, the default, waits until the
+// context ends.
+func (db *DB) SetBusyTimeout(d time.Duration) { db.busy.Store(int64(max(d, 0))) }
 
 func (db *DB) Close() error {
 	db.mu.Lock()

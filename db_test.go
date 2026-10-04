@@ -435,3 +435,27 @@ func TestUpdateWritesOnlyChangedPages(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestBusyTimeout(t *testing.T) {
+	db := openTest(t)
+	tx, e := db.Begin(bg)
+	if e != nil {
+		t.Fatal(e)
+	}
+	db.SetBusyTimeout(20 * time.Millisecond)
+	start := time.Now()
+	if _, e = db.Exec(bg, "CREATE TABLE t (id INTEGER PRIMARY KEY)"); !errors.Is(e, ErrLocked) {
+		t.Fatalf("got %v, want ErrLocked", e)
+	}
+	if waited := time.Since(start); waited < 20*time.Millisecond || waited > time.Second {
+		t.Fatalf("waited %v", waited)
+	}
+	done := make(chan error)
+	db.SetBusyTimeout(5 * time.Second)
+	go func() { _, e := db.Exec(bg, "CREATE TABLE t (id INTEGER PRIMARY KEY)"); done <- e }()
+	time.Sleep(10 * time.Millisecond)
+	tx.Rollback()
+	if e = <-done; e != nil {
+		t.Fatalf("waiter after release: %v", e)
+	}
+}
