@@ -93,7 +93,7 @@ func (tx *Tx) dropColumn(t *table, name string) error {
 		return fail("schema", "cannot drop primary key column %s", c.Name)
 	}
 	for _, i := range tx.indexes(t) {
-		if canon(i.Column) == canon(c.Name) {
+		if i.covers(c.Name) {
 			if i.Automatic {
 				return fail("schema", "cannot drop UNIQUE column %s", c.Name)
 			}
@@ -161,6 +161,11 @@ func (tx *Tx) renameColumn(t *table, from, to string) error {
 		if canon(i.Column) == old {
 			i.Column = to
 		}
+		for k, c := range i.Columns {
+			if canon(c) == old {
+				i.Columns[k] = to
+			}
+		}
 	}
 	for _, child := range tx.cat.Tables {
 		for _, c := range child.Columns {
@@ -183,7 +188,7 @@ func (tx *Tx) renameAutomaticIndexes(t *table) error {
 		}
 	}
 	for _, i := range moved {
-		i.Name = "__gbase_" + canon(t.Name) + "_" + canon(i.Column)
+		i.Name = automaticIndexName(t, i.cols())
 		if tx.cat.Indexes[canon(i.Name)] != nil || tx.cat.Tables[canon(i.Name)] != nil {
 			return fail("schema", "reserved index name collision")
 		}

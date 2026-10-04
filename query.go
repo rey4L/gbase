@@ -33,6 +33,7 @@ type queryProgram struct {
 	limit, offset int64
 	grouped       bool
 	seekOps       []string // comparison operators of the index terms used, for EXPLAIN QUERY PLAN
+	seekColumns   int      // composite index columns matched by equality, when more than one
 }
 type queryRow struct {
 	env           evalEnv
@@ -317,56 +318,114 @@ func (p *queryProgram) chooseIndex(tx *Tx, args []Value) {
 			break
 		}
 	}
+	// match reports a term comparing column to a constant of the column's own
+	// type, normalized so the column is on the left.
+	match := func(term sql.Expr, column string) (string, Value, bool) {
+		b, ok := term.(*sql.Binary)
+		if !ok {
+			return "", nil, false
+		}
+		op := b.Op
+		left, right := b.Left, b.Right
+		c, ok := left.(*sql.Column)
+		if !ok {
+			c, ok = right.(*sql.Column)
+			right = left
+			switch op {
+			case "<":
+				op = ">"
+			case "<=":
+				op = ">="
+			case ">":
+				op = "<"
+			case ">=":
+				op = "<="
+			}
+		}
+		if !ok || canon(c.Name) != canon(column) || c.Table != "" && canon(c.Table) != canon(binding.name) {
+			return "", nil, false
+		}
+		switch right.(type) {
+		case *sql.Literal, *sql.Parameter:
+		default:
+			return "", nil, false
+		}
+		v, e := eval(right, evalEnv{}, args)
+		if e != nil || v == nil {
+			return "", nil, false
+		}
+		typ := strings.ToUpper(binding.table.Columns[binding.table.col(column)].Type)
+		safe := false
+		switch v.(type) {
+		case int64:
+			safe = typ == "INTEGER"
+		case float64:
+			safe = typ == "REAL"
+		case string:
+			safe = typ == "TEXT"
+		case []byte:
+			safe = typ == "BLOB"
+		}
+		return op, v, safe
+	}
+	composite := false
+	for _, idx := range candidates {
+		composite = composite || len(idx.Columns) > 0
+	}
+	// A rowid equality is the best possible access path, so it keeps priority.
+	rowidEquality := false
+	if composite && primary != nil {
+		for _, term := range terms {
+			if op, _, ok := match(term, primary.Column); ok && op == "=" {
+				rowidEquality = true
+			}
+		}
+	}
+	// Prefer the composite index whose leading columns are most fully pinned by equalities.
+	var best *index
+	var bestKey []byte
+	bestN := 1
+	for _, idx := range candidates {
+		if !composite || rowidEquality {
+			break
+		}
+		if len(idx.Columns) == 0 {
+			continue
+		}
+		var key []byte
+		n := 0
+		for _, col := range idx.Columns {
+			found := false
+			for _, term := range terms {
+				if op, v, ok := match(term, col); ok && op == "=" {
+					if prefix, e := indexPrefix(v); e == nil {
+						key, found = append(key, prefix...), true
+						break
+					}
+				}
+			}
+			if !found {
+				break
+			}
+			n++
+		}
+		if n > bestN {
+			best, bestKey, bestN = idx, key, n
+		}
+	}
+	if best != nil {
+		p.start, p.end = bestKey, prefixEnd(bestKey)
+		p.idx = best
+		p.seekOps = []string{"="}
+		p.seekColumns = bestN
+		return
+	}
 	for _, idx := range candidates {
 		var lo, hi []byte
 		var ops []string
 		for _, term := range terms {
-			b, ok := term.(*sql.Binary)
+			op, v, ok := match(term, idx.Column)
 			if !ok {
-				continue
-			}
-			op := b.Op
-			left, right := b.Left, b.Right
-			c, ok := left.(*sql.Column)
-			if !ok {
-				c, ok = right.(*sql.Column)
-				right = left
-				switch op {
-				case "<":
-					op = ">"
-				case "<=":
-					op = ">="
-				case ">":
-					op = "<"
-				case ">=":
-					op = "<="
-				}
-			}
-			if !ok || canon(c.Name) != canon(idx.Column) || c.Table != "" && canon(c.Table) != canon(binding.name) {
-				continue
-			}
-			switch right.(type) {
-			case *sql.Literal, *sql.Parameter:
-			default:
-				continue
-			}
-			v, e := eval(right, evalEnv{}, args)
-			if e != nil || v == nil {
-				continue
-			}
-			typ := strings.ToUpper(binding.table.Columns[binding.table.col(idx.Column)].Type)
-			safe := false
-			switch v.(type) {
-			case int64:
-				safe = typ == "INTEGER"
-			case float64:
-				safe = typ == "REAL"
-			case string:
-				safe = typ == "TEXT"
-			case []byte:
-				safe = typ == "BLOB"
-			}
-			if !safe {
 				continue
 			}
 			prefix, e := indexPrefix(v)
@@ -823,7 +882,14 @@ func (p *queryProgram) queryPlan() []planNode {
 		}
 		var cond []string
 		var lower, upper bool
-		for _, op := range p.seekOps {
+		seekOps := p.seekOps
+		if p.seekColumns > 0 {
+			for _, c := range p.idx.cols()[:p.seekColumns] {
+				cond = append(cond, c+"=?")
+			}
+			seekOps = nil
+		}
+		for _, op := range seekOps {
 			switch op {
 			case "=":
 				cond = []string{col + "=?"}

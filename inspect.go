@@ -119,6 +119,11 @@ func (db *DB) Schema(ctx context.Context) ([]string, error) {
 			}
 			defs = append(defs, d)
 		}
+		for _, i := range tx.indexes(t) {
+			if i.Automatic && len(i.Columns) > 0 {
+				defs = append(defs, "UNIQUE ("+quoteIdents(i.Columns)+")")
+			}
+		}
 		out = append(out, "CREATE TABLE "+quoteIdent(t.Name)+" ("+strings.Join(defs, ", ")+");")
 		for _, i := range tx.indexes(t) {
 			if i.Automatic {
@@ -128,10 +133,18 @@ func (db *DB) Schema(ctx context.Context) ([]string, error) {
 			if i.Unique {
 				unique = "UNIQUE "
 			}
-			out = append(out, "CREATE "+unique+"INDEX "+quoteIdent(i.Name)+" ON "+quoteIdent(i.Table)+"("+quoteIdent(i.Column)+");")
+			out = append(out, "CREATE "+unique+"INDEX "+quoteIdent(i.Name)+" ON "+quoteIdent(i.Table)+"("+quoteIdents(i.cols())+");")
 		}
 	}
 	return out, nil
+}
+
+func quoteIdents(names []string) string {
+	quoted := make([]string, len(names))
+	for k, n := range names {
+		quoted[k] = quoteIdent(n)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 func (tx *Tx) check() error {
@@ -195,9 +208,10 @@ func (tx *Tx) check() error {
 		if e != nil {
 			return e
 		}
-		p := t.col(i.Column)
-		if p < 0 {
-			return fail("corrupt", "index column missing")
+		for _, c := range i.cols() {
+			if t.col(c) < 0 {
+				return fail("corrupt", "index column missing")
+			}
 		}
 		rows, e := tx.scanTable(t)
 		if e != nil {
@@ -206,11 +220,11 @@ func (tx *Tx) check() error {
 		expected := map[string][]byte{}
 		unique := map[string]bool{}
 		for _, r := range rows {
-			prefix, e := indexPrefix(r.values[p])
+			prefix, hasNull, e := indexKey(t, i, r.values)
 			if e != nil {
 				return e
 			}
-			if i.Unique && r.values[p] != nil {
+			if i.Unique && !hasNull {
 				if unique[string(prefix)] {
 					return fail("corrupt", "duplicate unique index value")
 				}

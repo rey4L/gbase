@@ -225,7 +225,11 @@ func (p *parser) createTable() Statement {
 				p.expect("KEY")
 				c.Kind = "FOREIGN KEY"
 			}
-			c.Column = p.names(true)[0]
+			names := p.names(c.Kind != "UNIQUE")
+			c.Column = names[0]
+			if len(names) > 1 {
+				c.Columns = names
+			}
 			if c.Kind == "FOREIGN KEY" {
 				p.expect("REFERENCES")
 				c.References = p.reference()
@@ -261,10 +265,22 @@ func (p *parser) createTable() Statement {
 	}
 	constraints := map[string]bool{}
 	for _, c := range s.Constraints {
-		name := strings.ToUpper(c.Column)
-		if !columns[name] {
-			p.fail("constraint references unknown column %q", c.Column)
+		names := c.Columns
+		if len(names) == 0 {
+			names = []string{c.Column}
 		}
+		seen := map[string]bool{}
+		for _, n := range names {
+			n = strings.ToUpper(n)
+			if !columns[n] {
+				p.fail("constraint references unknown column %q", n)
+			}
+			if seen[n] {
+				p.fail("duplicate constraint column %q", n)
+			}
+			seen[n] = true
+		}
+		name := strings.ToUpper(strings.Join(names, ","))
 		key := c.Kind + ":" + name
 		if constraints[key] {
 			p.fail("duplicate table constraint")

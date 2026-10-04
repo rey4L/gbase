@@ -31,6 +31,8 @@ Use `Begin(ctx)`, transaction `Exec`/`Query`, then `Commit` or `Rollback`. Close
 
 `BackupFile(ctx, path)` atomically writes a consistent copy while the database stays open; writers wait for it. `Backup(ctx, w)` streams the same copy to any writer.
 
+Indexes and UNIQUE constraints may span columns: `CREATE INDEX i ON t (a, b)`, `UNIQUE (a, b)` in `CREATE TABLE`. A NULL in any column exempts a row from uniqueness. Equalities on leading columns seek the index.
+
 Schema changes: `ALTER TABLE t ADD [COLUMN] def`, `DROP [COLUMN] c`, `RENAME TO name`, `RENAME [COLUMN] c TO name`. Each rewrites the table's rows, so it costs time proportional to the table.
 
 ```sh

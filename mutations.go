@@ -83,7 +83,9 @@ func (tx *Tx) createTable(s *sql.CreateTable) error {
 		case "PRIMARY KEY":
 			t.Columns[i].Primary = true
 		case "UNIQUE":
-			t.Columns[i].Unique = true
+			if len(con.Columns) == 0 {
+				t.Columns[i].Unique = true
+			}
 		case "FOREIGN KEY":
 			if t.Columns[i].Ref != nil {
 				return fail("schema", "duplicate foreign key on %s", con.Column)
@@ -116,18 +118,36 @@ func (tx *Tx) createTable(s *sql.CreateTable) error {
 			return e
 		}
 	}
+	var constraints [][]string
 	for _, c := range t.Columns {
 		if c.Unique && !(c.Primary && c.Type == "INTEGER") {
-			n := "__gbase_" + name + "_" + canon(c.Name)
-			if tx.cat.Indexes[n] != nil || tx.cat.Tables[n] != nil {
-				return fail("schema", "reserved index name collision")
-			}
-			if e = tx.addIndex(n, t, c.Name, true, true); e != nil {
-				return e
-			}
+			constraints = append(constraints, []string{c.Name})
+		}
+	}
+	for _, con := range s.Constraints {
+		if len(con.Columns) > 0 {
+			constraints = append(constraints, con.Columns)
+		}
+	}
+	for _, cols := range constraints {
+		n := automaticIndexName(t, cols)
+		if tx.cat.Indexes[n] != nil || tx.cat.Tables[n] != nil {
+			return fail("schema", "reserved index name collision")
+		}
+		if e = tx.addIndex(n, t, cols, true, true); e != nil {
+			return e
 		}
 	}
 	return nil
+}
+
+// automaticIndexName names the index backing a UNIQUE constraint.
+func automaticIndexName(t *table, cols []string) string {
+	n := "__gbase_" + canon(t.Name)
+	for _, c := range cols {
+		n += "_" + canon(c)
+	}
+	return n
 }
 
 func columnFromDef(d sql.ColumnDef) (column, error) {
@@ -206,9 +226,6 @@ func (tx *Tx) dropTable(s *sql.DropTable) error {
 }
 
 func (tx *Tx) createIndex(s *sql.CreateIndex) error {
-	if len(s.Columns) != 1 {
-		return fail("schema", "only single-column indexes supported")
-	}
 	n := canon(s.Name)
 	if tx.cat.Indexes[n] != nil {
 		if s.IfNotExists {
@@ -226,26 +243,39 @@ func (tx *Tx) createIndex(s *sql.CreateIndex) error {
 	if e != nil {
 		return e
 	}
-	return tx.addIndex(s.Name, t, s.Columns[0], s.Unique, false)
+	return tx.addIndex(s.Name, t, s.Columns, s.Unique, false)
 }
 
-func (tx *Tx) addIndex(name string, t *table, col string, unique, automatic bool) error {
-	p := t.col(col)
-	if p < 0 {
-		return fail("schema", "unknown index column %s", col)
+func (tx *Tx) addIndex(name string, t *table, cols []string, unique, automatic bool) error {
+	idx := &index{Name: name, Table: t.Name, Unique: unique, Automatic: automatic}
+	seen := map[string]bool{}
+	for _, col := range cols {
+		p := t.col(col)
+		if p < 0 {
+			return fail("schema", "unknown index column %s", col)
+		}
+		if seen[canon(col)] {
+			return fail("schema", "duplicate index column %s", col)
+		}
+		seen[canon(col)] = true
+		idx.Columns = append(idx.Columns, t.Columns[p].Name)
+	}
+	idx.Column = idx.Columns[0]
+	if len(idx.Columns) == 1 {
+		idx.Columns = nil
 	}
 	root, e := storage.CreateTree(tx.pages)
 	if e != nil {
 		return e
 	}
-	idx := &index{Name: name, Table: t.Name, Column: t.Columns[p].Name, Root: root, Unique: unique, Automatic: automatic}
+	idx.Root = root
 	tx.cat.Indexes[canon(name)] = idx
 	rows, e := tx.scanTable(t)
 	if e != nil {
 		return e
 	}
 	for _, r := range rows {
-		if e = tx.indexInsert(idx, r.id, r.values[p]); e != nil {
+		if e = tx.indexInsert(t, idx, r.id, r.values); e != nil {
 			return e
 		}
 	}
@@ -263,12 +293,12 @@ func (tx *Tx) dropIndex(s *sql.DropIndex) error {
 	if i.Automatic {
 		return fail("constraint", "cannot drop constraint index")
 	}
-	if i.Unique {
+	if i.Unique && len(i.Columns) == 0 {
 		parent := tx.cat.Tables[canon(i.Table)]
 		col := parent.col(i.Column)
 		redundant := parent.Columns[col].Primary || parent.Columns[col].Unique
 		for _, other := range tx.indexes(parent) {
-			if other != i && other.Unique && canon(other.Column) == canon(i.Column) {
+			if other != i && other.Unique && other.single(i.Column) {
 				redundant = true
 			}
 		}
@@ -414,13 +444,13 @@ func (tx *Tx) indexes(t *table) []*index {
 	return out
 }
 
-func (tx *Tx) indexInsert(i *index, id int64, v Value) error {
-	p, e := indexPrefix(v)
+func (tx *Tx) indexInsert(t *table, i *index, id int64, values []Value) error {
+	p, hasNull, e := indexKey(t, i, values)
 	if e != nil {
 		return e
 	}
 	tr := storage.Tree{Tx: tx.pages, Root: i.Root}
-	if i.Unique && v != nil {
+	if i.Unique && !hasNull {
 		c, e := tr.Scan(p, prefixEnd(p))
 		if e != nil {
 			return e
@@ -439,8 +469,8 @@ func (tx *Tx) indexInsert(i *index, id int64, v Value) error {
 	return nil
 }
 
-func (tx *Tx) indexDelete(i *index, id int64, v Value) error {
-	p, e := indexPrefix(v)
+func (tx *Tx) indexDelete(t *table, i *index, id int64, values []Value) error {
+	p, _, e := indexKey(t, i, values)
 	if e != nil {
 		return e
 	}
@@ -468,7 +498,7 @@ func (tx *Tx) putRow(t *table, id int64, v []Value) error {
 	}
 	t.Root = tr.Root
 	for _, i := range tx.indexes(t) {
-		if e = tx.indexInsert(i, id, v[t.col(i.Column)]); e != nil {
+		if e = tx.indexInsert(t, i, id, v); e != nil {
 			return e
 		}
 	}
@@ -477,7 +507,7 @@ func (tx *Tx) putRow(t *table, id int64, v []Value) error {
 
 func (tx *Tx) removeRow(t *table, r storedRow) error {
 	for _, i := range tx.indexes(t) {
-		if e := tx.indexDelete(i, r.id, r.values[t.col(i.Column)]); e != nil {
+		if e := tx.indexDelete(t, i, r.id, r.values); e != nil {
 			return e
 		}
 	}
@@ -595,7 +625,7 @@ func (tx *Tx) uniqueColumn(t *table, name string) bool {
 		return true
 	}
 	for _, idx := range tx.indexes(t) {
-		if idx.Unique && canon(idx.Column) == canon(name) {
+		if idx.Unique && idx.single(name) {
 			return true
 		}
 	}
@@ -617,7 +647,7 @@ func (tx *Tx) referencedValue(t *table, name string, value Value) (bool, error) 
 		return found, err
 	}
 	for _, idx := range tx.indexes(t) {
-		if !idx.Unique || canon(idx.Column) != canon(name) {
+		if !idx.Unique || !idx.single(name) {
 			continue
 		}
 		prefix, err := indexPrefix(value)

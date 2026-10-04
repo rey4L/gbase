@@ -48,10 +48,12 @@ type ColumnDef struct {
 	References                  *ForeignKey
 }
 
-// TableConstraint.Kind is PRIMARY KEY, UNIQUE, or FOREIGN KEY.
+// TableConstraint.Kind is PRIMARY KEY, UNIQUE, or FOREIGN KEY. Columns is
+// set only for a multi-column UNIQUE, with Column holding its first column.
 // Constraints retain source form; executors should process both Columns and Constraints.
 type TableConstraint struct {
 	Kind, Column string
+	Columns      []string
 	References   *ForeignKey
 }
 type CreateTable struct {

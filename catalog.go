@@ -25,11 +25,59 @@ type table struct {
 	NextID    int64
 	Exhausted bool
 }
+
+// index.Column is the leading column. Columns lists every column of a
+// composite index and is empty for single-column indexes, which keeps their
+// catalog encoding unchanged.
 type index struct {
 	Name, Table, Column string
+	Columns             []string `json:",omitempty"`
 	Root                uint32
 	Unique, Automatic   bool
 }
+
+func (i *index) cols() []string {
+	if len(i.Columns) > 0 {
+		return i.Columns
+	}
+	return []string{i.Column}
+}
+
+// single reports whether i indexes exactly the named column.
+func (i *index) single(name string) bool {
+	return len(i.Columns) == 0 && canon(i.Column) == canon(name)
+}
+
+// covers reports whether the named column is any column of i.
+func (i *index) covers(name string) bool {
+	for _, c := range i.cols() {
+		if canon(c) == canon(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// indexKey concatenates each column's order-preserving prefix, so a composite
+// key sorts by its columns in order and a leading-column prefix is a key
+// prefix. hasNull reports a NULL in any column, which exempts the row from
+// uniqueness as in SQL.
+func indexKey(t *table, i *index, values []Value) (key []byte, hasNull bool, err error) {
+	for _, c := range i.cols() {
+		v := values[t.col(c)]
+		hasNull = hasNull || v == nil
+		p, e := indexPrefix(v)
+		if e != nil {
+			return nil, false, e
+		}
+		key = append(key, p...)
+	}
+	if len(key)+8 > 1024 {
+		return nil, false, fail("limit", "indexed value exceeds 1024-byte key limit")
+	}
+	return key, hasNull, nil
+}
+
 type catalog struct {
 	Tables  map[string]*table
 	Indexes map[string]*index
@@ -157,8 +205,18 @@ func (tx *Tx) validateCatalog() error {
 			return fail("corrupt", "invalid index metadata")
 		}
 		t := tx.cat.Tables[canon(i.Table)]
-		if t == nil || t.col(i.Column) < 0 {
-			return fail("corrupt", "index target missing")
+		if t == nil || len(i.Columns) == 1 || len(i.Columns) > 0 && i.Column != i.Columns[0] {
+			return fail("corrupt", "invalid index metadata")
+		}
+		seen := map[string]bool{}
+		for _, c := range i.cols() {
+			if t.col(c) < 0 || seen[canon(c)] {
+				return fail("corrupt", "index target missing")
+			}
+			seen[canon(c)] = true
+		}
+		if len(i.Columns) > 0 && i.Automatic && !i.Unique {
+			return fail("corrupt", "invalid constraint index")
 		}
 	}
 	for _, t := range tx.cat.Tables {
@@ -166,7 +224,7 @@ func (tx *Tx) validateCatalog() error {
 			if c.Unique && !(c.Primary && c.Type == "INTEGER") {
 				found := false
 				for _, i := range tx.indexes(t) {
-					if i.Automatic && i.Unique && canon(i.Column) == canon(c.Name) {
+					if i.Automatic && i.Unique && i.single(c.Name) {
 						found = true
 						break
 					}
