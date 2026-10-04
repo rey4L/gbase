@@ -10,12 +10,14 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
 	"text/tabwriter"
 
 	"github.com/rey4L/gbase"
+	"github.com/rey4L/gbase/export"
 )
 
 func main() {
@@ -26,12 +28,34 @@ func main() {
 	os.Exit(run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, interactive))
 }
 
+func runExport(ctx context.Context, db *gbase.DB, dir string, d export.Dialect, out, stderr io.Writer) int {
+	report, err := export.Export(ctx, db, dir, d)
+	if cerr := db.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	for _, t := range report.Tables {
+		fmt.Fprintf(out, "%s: %d rows\n", t.Name, t.Rows)
+	}
+	for _, w := range report.Warnings {
+		fmt.Fprintln(out, "warning:", w)
+	}
+	fmt.Fprintf(out, "wrote %s; see %s\n", dir, filepath.Join(dir, "REPORT.md"))
+	return 0
+}
+
 // run keeps streams injectable so scripts exercise the same path as the shell.
 func run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer, interactive bool) (code int) {
 	flags := flag.NewFlagSet("gbase", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	exportDir := flags.String("export", "", "write `DIR` with DDL, CSV data, and a load script instead of starting the shell")
+	dialect := flags.String("dialect", "postgres", "export target: postgres or oracle")
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: gbase file.db\nSQL ends with ; (or script EOF). Commands: .tables .schema .check .backup FILE .exit\nBEGIN [TRANSACTION], COMMIT, ROLLBACK control transactions. EOF rolls back.")
+		fmt.Fprintln(stderr, "Usage: gbase file.db\n       gbase -export DIR [-dialect postgres|oracle] file.db\nSQL ends with ; (or script EOF). Commands: .tables .schema .check .backup FILE .exit\nBEGIN [TRANSACTION], COMMIT, ROLLBACK control transactions. EOF rolls back.")
+		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -47,6 +71,9 @@ func run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
+	}
+	if *exportDir != "" {
+		return runExport(ctx, db, *exportDir, export.Dialect(*dialect), out, stderr)
 	}
 	s := shell{db: db, out: out}
 	defer func() {

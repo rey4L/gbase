@@ -230,3 +230,21 @@ func TestBackupCommand(t *testing.T) {
 		t.Fatalf("restored copy: code %d\nout %q\nstderr %q", code, out, stderr)
 	}
 }
+
+func TestExportFlag(t *testing.T) {
+	dir := t.TempDir()
+	db := filepath.Join(dir, "app.db")
+	if code, _, stderr := script(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, size INTEGER);\nINSERT INTO t (size) VALUES (1);\n"); code != 0 {
+		t.Fatal(stderr)
+	}
+	var out, stderr bytes.Buffer
+	if code := run(context.Background(), []string{"-export", filepath.Join(dir, "ora"), "-dialect", "oracle", db}, strings.NewReader(""), &out, &stderr, false); code != 0 {
+		t.Fatalf("code %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(out.String(), "t: 1 rows") || !strings.Contains(out.String(), "warning: size is reserved in Oracle") {
+		t.Fatalf("output %q", out.String())
+	}
+	if code := run(context.Background(), []string{"-export", filepath.Join(dir, "x"), "-dialect", "mysql", db}, strings.NewReader(""), io.Discard, &stderr, false); code != 1 {
+		t.Fatalf("unknown dialect: code %d", code)
+	}
+}

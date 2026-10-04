@@ -12,7 +12,9 @@ INSERT INTO users (name) VALUES ('Ada');
 SELECT * FROM users;
 ```
 
-Shell: `.tables`, `.schema`, `.check`, `.backup FILE`, `.exit`. Scripts: `go run ./cmd/gbase demo.db < script.sql`.
+Shell: `.tables`, `.schema`, `.check`, `.backup FILE`, `.exit`.
+
+Export to PostgreSQL or Oracle: `go run ./cmd/gbase -export DIR -dialect postgres demo.db` writes DDL, CSV data, a load script, and `REPORT.md`, which lists data the target would reject or change (reserved names; for Oracle, `''` becoming NULL and partial-NULL duplicates in multi-column UNIQUE). Scripts: `go run ./cmd/gbase demo.db < script.sql`.
 
 Go import: `github.com/rey4L/gbase`. In another local module, add `replace github.com/rey4L/gbase => ../gbase` to `go.mod`.
 
