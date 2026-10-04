@@ -330,6 +330,61 @@ func (tx *Tx) scanTable(t *table) ([]storedRow, error) {
 	return out, c.Err()
 }
 
+// mutationProgram builds the access path for UPDATE and DELETE, which reuse SELECT's index choice.
+// where must already be bound to t.
+func (tx *Tx) mutationProgram(t *table, where sql.Expr, args []Value) *queryProgram {
+	p := &queryProgram{stmt: &sql.Select{From: sql.TableRef{Name: t.Name}, Where: where}, env: rowEnv(t, nil)}
+	p.chooseIndex(tx, args)
+	return p
+}
+
+// scanWhere returns a superset of the rows matching where, seeking through an index when one applies.
+// Callers still evaluate the full predicate on every returned row.
+func (tx *Tx) scanWhere(t *table, where sql.Expr, args []Value) ([]storedRow, error) {
+	p := tx.mutationProgram(t, where, args)
+	if p.idx == nil {
+		return tx.scanTable(t)
+	}
+	table := storage.Tree{Tx: tx.pages, Root: t.Root}
+	source := table
+	if !p.primary {
+		source = storage.Tree{Tx: tx.pages, Root: p.idx.Root}
+	}
+	c, e := source.Scan(p.start, p.end)
+	if e != nil {
+		return nil, e
+	}
+	var out []storedRow
+	for c.Next() {
+		if e = tx.ctx.Err(); e != nil {
+			return nil, e
+		}
+		key, data := c.Key(), c.Value()
+		if !p.primary {
+			key = data
+			var ok bool
+			if data, ok, e = table.Get(key); e != nil {
+				return nil, e
+			} else if !ok {
+				return nil, fail("corrupt", "dangling index entry")
+			}
+		}
+		id, e := keyRow(key)
+		if e != nil {
+			return nil, e
+		}
+		v, e := decodeRecord(data)
+		if e != nil {
+			return nil, e
+		}
+		if len(v) != len(t.Columns) {
+			return nil, fail("corrupt", "row width differs from schema")
+		}
+		out = append(out, storedRow{id, v})
+	}
+	return out, c.Err()
+}
+
 func (tx *Tx) indexes(t *table) []*index {
 	var out []*index
 	for _, i := range tx.cat.Indexes {
@@ -631,7 +686,7 @@ func (tx *Tx) deleteRows(s *sql.Delete, args []Value) (Result, error) {
 	if e := bindExpr(s.Where, rowEnv(t, nil), false); e != nil {
 		return Result{}, e
 	}
-	rows, e := tx.scanTable(t)
+	rows, e := tx.scanWhere(t, s.Where, args)
 	if e != nil {
 		return Result{}, e
 	}
@@ -679,7 +734,7 @@ func (tx *Tx) update(s *sql.Update, args []Value) (Result, error) {
 			return Result{}, e
 		}
 	}
-	rows, e := tx.scanTable(t)
+	rows, e := tx.scanWhere(t, s.Where, args)
 	if e != nil {
 		return Result{}, e
 	}

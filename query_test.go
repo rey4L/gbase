@@ -137,8 +137,9 @@ func TestExplainQueryPlan(t *testing.T) {
 		{"SELECT b, COUNT(*) FROM t GROUP BY b", []string{"SCAN t", "USE TEMP B-TREE FOR GROUP BY"}},
 		{"SELECT COUNT(*) FROM t", []string{"SCAN t"}},
 		{"SELECT DISTINCT b FROM t ORDER BY b", []string{"SCAN t", "USE TEMP B-TREE FOR DISTINCT", "USE TEMP B-TREE FOR ORDER BY"}},
-		{"UPDATE t SET a = 1 WHERE id = 1", []string{"SCAN t"}},
-		{"DELETE FROM t WHERE a = 1", []string{"SCAN t"}},
+		{"UPDATE t SET a = 1 WHERE id = 1", []string{"SEARCH t USING INTEGER PRIMARY KEY (rowid=?)"}},
+		{"UPDATE t SET a = 1", []string{"SCAN t"}},
+		{"DELETE FROM t WHERE a = 1", []string{"SEARCH t USING INDEX ia (a=?)"}},
 	}
 	for _, tt := range tests {
 		var args []any
@@ -219,5 +220,67 @@ func TestCombinedRangeBounds(t *testing.T) {
 		if rows[0][3] != p.want {
 			t.Fatalf("%s: %v want %s", p.sql, rows[0][3], p.want)
 		}
+	}
+}
+
+func TestMutationsSeekThroughIndexes(t *testing.T) {
+	db := openTest(t)
+	for _, name := range []string{"fast", "slow"} {
+		execTest(t, db, "CREATE TABLE "+name+" (id INTEGER PRIMARY KEY, n INTEGER, s TEXT)")
+		execTest(t, db, "CREATE INDEX "+name+"_n ON "+name+"(n)")
+		tx, e := db.Begin(bg)
+		if e != nil {
+			t.Fatal(e)
+		}
+		for i := 0; i < 60; i++ {
+			if _, e = tx.Exec(bg, "INSERT INTO "+name+" VALUES (?,?,?)", i, i%9, "r"); e != nil {
+				t.Fatal(e)
+			}
+		}
+		if e = tx.Commit(); e != nil {
+			t.Fatal(e)
+		}
+	}
+	// "slow" wraps columns in expressions so every statement is a full scan with the same predicate.
+	steps := []string{
+		"UPDATE %s SET s = 'a' WHERE %s >= 10 AND %s < 20",
+		"UPDATE %s SET n = n + 100 WHERE %s = 4",
+		"UPDATE %s SET id = id + 1000 WHERE %s > 50",
+		"DELETE FROM %s WHERE %s >= 30 AND %s <= 35",
+		"DELETE FROM %s WHERE %s = 3 AND %s > 100",
+		"DELETE FROM %s WHERE %s > 7 AND %s < 2",
+		"UPDATE %s SET s = 'z' WHERE %s < 5",
+	}
+	cols := []string{"id", "id", "id", "id", "n", "n", "n"}
+	for i, step := range steps {
+		var want Result
+		for _, name := range []string{"fast", "slow"} {
+			col := cols[i]
+			if name == "slow" {
+				col = "(" + col + "+0)"
+			}
+			q := strings.Replace(strings.Replace(strings.Replace(step, "%s", name, 1), "%s", col, 1), "%s", col, 1)
+			r, e := db.Exec(bg, q)
+			if e != nil {
+				t.Fatalf("%s: %v", q, e)
+			}
+			if name == "fast" {
+				want = r
+			} else if r.RowsAffected != want.RowsAffected {
+				t.Fatalf("%s: affected %d, indexed run affected %d", q, r.RowsAffected, want.RowsAffected)
+			}
+		}
+		fast := queryTest(t, db, "SELECT id, n, s FROM fast ORDER BY id")
+		slow := queryTest(t, db, "SELECT id, n, s FROM slow ORDER BY id")
+		if !reflect.DeepEqual(fast, slow) {
+			t.Fatalf("step %q diverged:\nfast %v\nslow %v", step, fast, slow)
+		}
+		// Index contents must agree with the table after every mutation.
+		if got := queryTest(t, db, "SELECT COUNT(*) FROM fast WHERE n >= -1"); !reflect.DeepEqual(got, queryTest(t, db, "SELECT COUNT(*) FROM slow WHERE (n+0) >= -1")) {
+			t.Fatalf("index diverged after %q", step)
+		}
+	}
+	if e := db.Check(bg); e != nil {
+		t.Fatal(e)
 	}
 }

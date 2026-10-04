@@ -867,7 +867,7 @@ func (tx *Tx) explainQueryPlan(stmt sql.Statement, args []Value) (*queryResult, 
 		}
 		return queryPlanResult(p.queryPlan()), nil
 	case *sql.Update, *sql.Delete:
-		// Mutations always scan the whole table; validate them without writing.
+		// Validate the statement without writing; the plan is the one the mutation would use.
 		var table string
 		var where sql.Expr
 		if u, ok := s.(*sql.Update); ok {
@@ -893,7 +893,7 @@ func (tx *Tx) explainQueryPlan(stmt sql.Statement, args []Value) (*queryResult, 
 		if e := bindExpr(where, rowEnv(t, nil), false); e != nil {
 			return nil, e
 		}
-		return queryPlanResult([]planNode{{id: 1, detail: "SCAN " + t.Name}}), nil
+		return queryPlanResult(tx.mutationProgram(t, where, args).queryPlan()), nil
 	}
 	return nil, fmt.Errorf("EXPLAIN QUERY PLAN supports SELECT, UPDATE and DELETE")
 }
