@@ -54,6 +54,57 @@ func (db *DB) Schema(ctx context.Context) ([]string, error) {
 		return nil, ErrClosed
 	}
 	var out []string
+	ordered, e := tx.orderedTables()
+	if e != nil {
+		return nil, e
+	}
+	for _, t := range ordered {
+		var defs []string
+		for _, c := range t.Columns {
+			d := quoteIdent(c.Name) + " " + c.typeName()
+			if c.Primary {
+				d += " PRIMARY KEY"
+			} else if c.Unique {
+				d += " UNIQUE"
+			}
+			if c.NotNull && !c.Primary {
+				d += " NOT NULL"
+			}
+			if c.Default != nil {
+				v, e := decodeRecord(c.Default)
+				if e != nil {
+					return nil, e
+				}
+				d += " DEFAULT " + literal(v[0])
+			}
+			if c.Ref != nil {
+				d += " REFERENCES " + quoteIdent(c.Ref.Table) + "(" + quoteIdent(c.Ref.Column) + ")"
+			}
+			defs = append(defs, d)
+		}
+		for _, i := range tx.indexes(t) {
+			if i.Automatic && len(i.Columns) > 0 {
+				defs = append(defs, "UNIQUE ("+quoteIdents(i.Columns)+")")
+			}
+		}
+		out = append(out, "CREATE TABLE "+quoteIdent(t.Name)+" ("+strings.Join(defs, ", ")+");")
+		for _, i := range tx.indexes(t) {
+			if i.Automatic {
+				continue
+			}
+			unique := ""
+			if i.Unique {
+				unique = "UNIQUE "
+			}
+			out = append(out, "CREATE "+unique+"INDEX "+quoteIdent(i.Name)+" ON "+quoteIdent(i.Table)+"("+quoteIdents(i.cols())+");")
+		}
+	}
+	return out, nil
+}
+
+// orderedTables lists tables with each foreign key's target before the
+// tables referencing it, and otherwise by name.
+func (tx *Tx) orderedTables() ([]*table, error) {
 	names := make([]string, 0, len(tx.cat.Tables))
 	for n := range tx.cat.Tables {
 		names = append(names, n)
@@ -94,47 +145,9 @@ func (db *DB) Schema(ctx context.Context) ([]string, error) {
 			return nil, err
 		}
 	}
-	for _, n := range ordered {
-		t := tx.cat.Tables[n]
-		var defs []string
-		for _, c := range t.Columns {
-			d := quoteIdent(c.Name) + " " + c.typeName()
-			if c.Primary {
-				d += " PRIMARY KEY"
-			} else if c.Unique {
-				d += " UNIQUE"
-			}
-			if c.NotNull && !c.Primary {
-				d += " NOT NULL"
-			}
-			if c.Default != nil {
-				v, e := decodeRecord(c.Default)
-				if e != nil {
-					return nil, e
-				}
-				d += " DEFAULT " + literal(v[0])
-			}
-			if c.Ref != nil {
-				d += " REFERENCES " + quoteIdent(c.Ref.Table) + "(" + quoteIdent(c.Ref.Column) + ")"
-			}
-			defs = append(defs, d)
-		}
-		for _, i := range tx.indexes(t) {
-			if i.Automatic && len(i.Columns) > 0 {
-				defs = append(defs, "UNIQUE ("+quoteIdents(i.Columns)+")")
-			}
-		}
-		out = append(out, "CREATE TABLE "+quoteIdent(t.Name)+" ("+strings.Join(defs, ", ")+");")
-		for _, i := range tx.indexes(t) {
-			if i.Automatic {
-				continue
-			}
-			unique := ""
-			if i.Unique {
-				unique = "UNIQUE "
-			}
-			out = append(out, "CREATE "+unique+"INDEX "+quoteIdent(i.Name)+" ON "+quoteIdent(i.Table)+"("+quoteIdents(i.cols())+");")
-		}
+	out := make([]*table, len(ordered))
+	for i, n := range ordered {
+		out[i] = tx.cat.Tables[n]
 	}
 	return out, nil
 }
