@@ -214,3 +214,19 @@ EXPLAIN QUERY PLAN SELECT * FROM t WHERE id > 1 ORDER BY a;
 		t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
 	}
 }
+
+func TestBackupCommand(t *testing.T) {
+	dir := t.TempDir()
+	backup := filepath.Join(dir, "backup.db")
+	code, out, stderr := script(t, filepath.Join(dir, "live.db"), "CREATE TABLE t (id INTEGER PRIMARY KEY);\nINSERT INTO t VALUES (7);\n.backup "+backup+"\n.backup\n")
+	if code == 0 || !strings.Contains(out, "ok") || !strings.Contains(stderr, "one file argument") {
+		t.Fatalf("code %d\nout %q\nstderr %q", code, out, stderr)
+	}
+	if code, _, stderr = script(t, filepath.Join(dir, "live.db"), "BEGIN;\n.backup "+backup+"\n"); code == 0 || !strings.Contains(stderr, "explicit transaction") {
+		t.Fatalf("backup in transaction: code %d stderr %q", code, stderr)
+	}
+	code, out, stderr = script(t, backup, "SELECT id FROM t;\n.check\n")
+	if code != 0 || !strings.Contains(out, "7") || !strings.Contains(out, "ok") {
+		t.Fatalf("restored copy: code %d\nout %q\nstderr %q", code, out, stderr)
+	}
+}

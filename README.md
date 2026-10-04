@@ -12,7 +12,7 @@ INSERT INTO users (name) VALUES ('Ada');
 SELECT * FROM users;
 ```
 
-Shell: `.tables`, `.schema`, `.check`, `.exit`. Scripts: `go run ./cmd/gbase demo.db < script.sql`.
+Shell: `.tables`, `.schema`, `.check`, `.backup FILE`, `.exit`. Scripts: `go run ./cmd/gbase demo.db < script.sql`.
 
 Go import: `github.com/rey4L/gbase`. In another local module, add `replace github.com/rey4L/gbase => ../gbase` to `go.mod`.
 
@@ -28,6 +28,8 @@ if err := rows.Err(); err != nil { panic(err) }
 ```
 
 Use `Begin(ctx)`, transaction `Exec`/`Query`, then `Commit` or `Rollback`. Close query cursors before issuing another operation.
+
+`BackupFile(ctx, path)` atomically writes a consistent copy while the database stays open; writers wait for it. `Backup(ctx, w)` streams the same copy to any writer.
 
 Schema changes: `ALTER TABLE t ADD [COLUMN] def`, `DROP [COLUMN] c`, `RENAME TO name`, `RENAME [COLUMN] c TO name`. Each rewrites the table's rows, so it costs time proportional to the table.
 

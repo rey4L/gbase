@@ -31,7 +31,7 @@ func run(ctx context.Context, args []string, in io.Reader, out, stderr io.Writer
 	flags := flag.NewFlagSet("gbase", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: gbase file.db\nSQL ends with ; (or script EOF). Commands: .tables .schema .check .exit\nBEGIN [TRANSACTION], COMMIT, ROLLBACK control transactions. EOF rolls back.")
+		fmt.Fprintln(stderr, "Usage: gbase file.db\nSQL ends with ; (or script EOF). Commands: .tables .schema .check .backup FILE .exit\nBEGIN [TRANSACTION], COMMIT, ROLLBACK control transactions. EOF rolls back.")
 	}
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -181,6 +181,19 @@ func (s *shell) execute(ctx context.Context, statement string) (bool, error) {
 	}
 	first := strings.ToUpper(words[0])
 	if strings.HasPrefix(first, ".") {
+		if first == ".BACKUP" {
+			if len(words) != 2 {
+				return false, errors.New(".backup takes one file argument")
+			}
+			if s.tx != nil {
+				return false, errors.New(".backup unavailable during an explicit transaction")
+			}
+			if err := s.db.BackupFile(ctx, words[1]); err != nil {
+				return false, err
+			}
+			_, err := fmt.Fprintln(s.out, "ok")
+			return false, err
+		}
 		if len(words) != 1 {
 			return false, fmt.Errorf("%s takes no arguments", words[0])
 		}

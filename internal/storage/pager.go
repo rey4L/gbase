@@ -231,6 +231,9 @@ func (p *Pager) check() error {
 	return nil
 }
 
+// Path is the database file the pager opened.
+func (p *Pager) Path() string { return p.path }
+
 func (p *Pager) Begin() (*Tx, error) {
 	if err := p.check(); err != nil {
 		return nil, err
@@ -316,6 +319,31 @@ func (t *Tx) Read(id uint32) ([]byte, error) {
 	t.p.cache[id] = b
 	t.p.order = append(t.p.order, id)
 	return bytes.Clone(b), nil
+}
+
+// Copy writes the committed database image, page by page, to w. The result
+// is a valid database file. It requires a transaction with no writes, which
+// holds out writers for the duration, and verifies each page's checksum.
+func (t *Tx) Copy(w io.Writer) error {
+	if err := t.check(); err != nil {
+		return err
+	}
+	if len(t.dirty) != 0 || t.count != t.p.count || t.root != t.p.root {
+		return ErrBusy
+	}
+	for id := uint32(0); id < t.count; id++ {
+		b, err := readPage(t.p.file, id)
+		if err != nil {
+			return err
+		}
+		if !valid(b) {
+			return fmt.Errorf("%w: page %d checksum", ErrCorrupt, id)
+		}
+		if _, err = w.Write(b); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Write copies a full page and replaces its final four bytes with the page CRC.
