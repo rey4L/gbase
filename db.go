@@ -218,9 +218,11 @@ func (tx *Tx) Exec(ctx context.Context, query string, args ...any) (Result, erro
 	}
 	if e != nil {
 		tx.pages.Restore(snap)
+		tx.pages.Release(snap)
 		tx.cat = cat
 		return Result{}, e
 	}
+	tx.pages.Release(snap)
 	return r, nil
 }
 

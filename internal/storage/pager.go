@@ -61,14 +61,31 @@ type Tx struct {
 	free        map[uint32]bool
 	dirty       map[uint32][]byte
 	done        bool
+	// Savepoints are an undo journal rather than copies: while any savepoint is
+	// outstanding, each mutation records the value it replaced.
+	undo  []undoEntry
+	open  int
+	epoch int
+	gen   int
+	cuts  []cut
+}
+
+// cut records that restoring to mark invalidated every savepoint taken before
+// generation gen with a later mark.
+type cut struct{ mark, gen int }
+
+type undoEntry struct {
+	id       uint32
+	page     []byte // previous dirty page; nil when it was not dirty
+	wasFree  bool
+	freeOnly bool // entry restores t.free[id] only
 }
 
 // Snapshot is an opaque, reusable savepoint owned by one transaction.
 type Snapshot struct {
-	owner       *Tx
-	count, root uint32
-	free        map[uint32]bool
-	dirty       map[uint32][]byte
+	owner            *Tx
+	count, root      uint32
+	mark, epoch, gen int
 }
 
 func checksum(b []byte) uint32 { return crc32.ChecksumIEEE(b) }
@@ -315,6 +332,7 @@ func (t *Tx) Write(id uint32, data []byte) error {
 	}
 	b := bytes.Clone(data)
 	seal(b)
+	t.logDirty(id)
 	t.dirty[id] = b
 	return nil
 }
@@ -331,6 +349,7 @@ func (t *Tx) Alloc() (uint32, error) {
 		}
 	}
 	if id != 0 {
+		t.logFree(id)
 		delete(t.free, id)
 	} else {
 		if t.count == math.MaxUint32 {
@@ -339,6 +358,7 @@ func (t *Tx) Alloc() (uint32, error) {
 		id = t.count
 		t.count++
 	}
+	t.logDirty(id)
 	t.dirty[id] = make([]byte, PageSize)
 	seal(t.dirty[id])
 	return id, nil
@@ -351,7 +371,9 @@ func (t *Tx) Free(id uint32) error {
 	if err := t.page(id); err != nil {
 		return err
 	}
+	t.logFree(id)
 	t.free[id] = true
+	t.logDirty(id)
 	delete(t.dirty, id)
 	return nil
 }
@@ -395,8 +417,35 @@ func (t *Tx) CheckOwnership(owned []uint32) error {
 	return nil
 }
 
+func (t *Tx) logDirty(id uint32) {
+	if t.open > 0 {
+		t.undo = append(t.undo, undoEntry{id: id, page: t.dirty[id]})
+	}
+}
+
+func (t *Tx) logFree(id uint32) {
+	if t.open > 0 {
+		t.undo = append(t.undo, undoEntry{id: id, wasFree: t.free[id], freeOnly: true})
+	}
+}
+
+// Savepoint is O(1). It stays valid until Release drops the last outstanding
+// savepoint or an earlier savepoint is restored. Dirty pages are never mutated
+// in place, so the journal can keep references instead of copies.
 func (t *Tx) Savepoint() Snapshot {
-	return Snapshot{t, t.count, t.root, cloneFree(t.free), cloneDirty(t.dirty)}
+	t.open++
+	return Snapshot{t, t.count, t.root, len(t.undo), t.epoch, t.gen}
+}
+
+// Release declares that a savepoint will not be used again. Once none are
+// outstanding the journal is discarded.
+func (t *Tx) Release(s Snapshot) {
+	if s.owner != t || s.epoch != t.epoch || t.open == 0 {
+		return
+	}
+	if t.open--; t.open == 0 {
+		t.undo, t.cuts, t.epoch = nil, nil, t.epoch+1
+	}
 }
 
 func (t *Tx) Restore(s Snapshot) error {
@@ -406,9 +455,31 @@ func (t *Tx) Restore(s Snapshot) error {
 	if s.owner != t {
 		return errors.New("storage: foreign savepoint")
 	}
+	if s.epoch != t.epoch || s.mark > len(t.undo) {
+		return errors.New("storage: stale savepoint")
+	}
+	for _, c := range t.cuts {
+		if c.gen > s.gen && s.mark > c.mark {
+			return errors.New("storage: stale savepoint")
+		}
+	}
+	for i := len(t.undo) - 1; i >= s.mark; i-- {
+		u := t.undo[i]
+		switch {
+		case u.freeOnly && u.wasFree:
+			t.free[u.id] = true
+		case u.freeOnly:
+			delete(t.free, u.id)
+		case u.page != nil:
+			t.dirty[u.id] = u.page
+		default:
+			delete(t.dirty, u.id)
+		}
+	}
+	t.undo = t.undo[:s.mark]
+	t.gen++
+	t.cuts = append(t.cuts, cut{s.mark, t.gen})
 	t.count, t.root = s.count, s.root
-	t.free = cloneFree(s.free)
-	t.dirty = cloneDirty(s.dirty)
 	return nil
 }
 

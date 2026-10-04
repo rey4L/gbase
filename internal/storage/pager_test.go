@@ -552,3 +552,37 @@ func TestPageChecksum(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestSavepointJournalRelease(t *testing.T) {
+	p := openTest(t, filepath.Join(t.TempDir(), "db"))
+	x := beginTest(t, p)
+	a := allocTest(t, x)
+	must(t, x.Write(a, pageByte(1)))
+	outer := x.Savepoint()
+	must(t, x.Write(a, pageByte(2)))
+	inner := x.Savepoint()
+	must(t, x.Write(a, pageByte(3)))
+	must(t, x.Restore(inner))
+	readEquals(t, x, a, 2)
+	must(t, x.Restore(outer))
+	readEquals(t, x, a, 1)
+	// inner was taken after outer's mark was rewound, so it can no longer be applied.
+	must(t, x.Write(a, pageByte(4)))
+	if e := x.Restore(inner); e == nil {
+		t.Fatal("stale savepoint accepted")
+	}
+	x.Release(inner)
+	x.Release(outer)
+	if len(x.undo) != 0 {
+		t.Fatal("journal not discarded after last release")
+	}
+	// Released savepoints are rejected and mutations are no longer journaled.
+	must(t, x.Write(a, pageByte(5)))
+	if len(x.undo) != 0 {
+		t.Fatal("journaling without savepoint")
+	}
+	if e := x.Restore(outer); e == nil {
+		t.Fatal("released savepoint accepted")
+	}
+	must(t, x.Commit())
+}
