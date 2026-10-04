@@ -52,6 +52,15 @@ func (p *parser) take(s string) bool {
 	return false
 }
 
+// takeWord consumes an unreserved word such as QUERY or PLAN, matched case-insensitively.
+func (p *parser) takeWord(s string) bool {
+	if t := p.peek(); p.err == nil && t.Kind == TokenIdentifier && strings.EqualFold(t.Text, s) {
+		p.next()
+		return true
+	}
+	return false
+}
+
 func (p *parser) fail(format string, args ...any) {
 	if p.err == nil {
 		p.err = &Error{Pos: p.peek().Pos, Message: fmt.Sprintf(format, args...)}
@@ -90,11 +99,16 @@ func (p *parser) statement() Statement {
 	case p.take("DELETE"):
 		return p.deleteStatement()
 	case p.take("EXPLAIN"):
+		plan := p.takeWord("QUERY")
+		if plan && !p.takeWord("PLAN") {
+			p.fail("expected PLAN, found %q", p.peek().Text)
+			return nil
+		}
 		if p.is("EXPLAIN") {
 			p.fail("nested EXPLAIN is unsupported")
 			return nil
 		}
-		return &Explain{Statement: p.statement()}
+		return &Explain{Statement: p.statement(), QueryPlan: plan}
 	default:
 		p.fail("expected supported SQL statement, found %q", p.peek().Text)
 		return nil

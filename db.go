@@ -256,7 +256,7 @@ func (tx *Tx) Query(ctx context.Context, query string, args ...any) (*Rows, erro
 	case *sql.Select:
 		q, e = tx.executeSelect(s, params)
 	case *sql.Explain:
-		q, e = tx.explain(s.Statement, params)
+		q, e = tx.explain(s, params)
 	default:
 		return nil, fail("statement", "Query requires SELECT or EXPLAIN")
 	}
@@ -411,8 +411,11 @@ func (db *DB) Check(ctx context.Context) error {
 	return tx.check()
 }
 
-func (tx *Tx) explain(stmt sql.Statement, args []Value) (*queryResult, error) {
-	s, ok := stmt.(*sql.Select)
+func (tx *Tx) explain(x *sql.Explain, args []Value) (*queryResult, error) {
+	if x.QueryPlan {
+		return tx.explainQueryPlan(x.Statement, args)
+	}
+	s, ok := x.Statement.(*sql.Select)
 	if !ok {
 		return nil, fmt.Errorf("EXPLAIN currently supports SELECT")
 	}

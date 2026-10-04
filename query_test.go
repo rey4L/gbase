@@ -114,3 +114,57 @@ func TestStreamingAndOperationCancellation(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestExplainQueryPlan(t *testing.T) {
+	db := openTest(t)
+	execTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER, b TEXT)")
+	execTest(t, db, "CREATE TABLE u (id INTEGER PRIMARY KEY, c INTEGER)")
+	execTest(t, db, "CREATE INDEX ia ON t(a)")
+	tests := []struct {
+		sql  string
+		want []string
+	}{
+		{"SELECT 1", []string{"SCAN CONSTANT ROW"}},
+		{"SELECT * FROM t", []string{"SCAN t"}},
+		{"SELECT * FROM t AS x", []string{"SCAN x"}},
+		{"SELECT * FROM t WHERE id = ?", []string{"SEARCH t USING INTEGER PRIMARY KEY (rowid=?)"}},
+		{"SELECT * FROM t WHERE id >= 3", []string{"SEARCH t USING INTEGER PRIMARY KEY (rowid>?)"}},
+		{"SELECT * FROM t WHERE 3 > id", []string{"SEARCH t USING INTEGER PRIMARY KEY (rowid<?)"}},
+		{"SELECT * FROM t WHERE a = 1", []string{"SEARCH t USING INDEX ia (a=?)"}},
+		{"SELECT * FROM t WHERE a = 1 OR a = 2", []string{"SCAN t"}},
+		{"SELECT * FROM t JOIN u ON t.id = u.id", []string{"SCAN t", "SCAN u"}},
+		{"SELECT b, COUNT(*) FROM t GROUP BY b", []string{"SCAN t", "USE TEMP B-TREE FOR GROUP BY"}},
+		{"SELECT COUNT(*) FROM t", []string{"SCAN t"}},
+		{"SELECT DISTINCT b FROM t ORDER BY b", []string{"SCAN t", "USE TEMP B-TREE FOR DISTINCT", "USE TEMP B-TREE FOR ORDER BY"}},
+		{"UPDATE t SET a = 1 WHERE id = 1", []string{"SCAN t"}},
+		{"DELETE FROM t WHERE a = 1", []string{"SCAN t"}},
+	}
+	for _, tt := range tests {
+		var args []any
+		if strings.Contains(tt.sql, "?") {
+			args = append(args, 1)
+		}
+		rows := queryTest(t, db, "EXPLAIN QUERY PLAN "+tt.sql, args...)
+		var got []string
+		for _, r := range rows {
+			if len(r) != 4 || r[1] != int64(0) {
+				t.Fatalf("%s: %v", tt.sql, rows)
+			}
+			got = append(got, r[3].(string))
+		}
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Fatalf("%s: %q want %q", tt.sql, got, tt.want)
+		}
+	}
+	execTest(t, db, "INSERT INTO t VALUES (1, 1, 'x')")
+	queryTest(t, db, "EXPLAIN QUERY PLAN DELETE FROM t")
+	queryTest(t, db, "EXPLAIN QUERY PLAN UPDATE t SET a = 2")
+	if got := queryTest(t, db, "SELECT a FROM t"); !reflect.DeepEqual(got, [][]Value{{int64(1)}}) {
+		t.Fatalf("EXPLAIN modified data: %v", got)
+	}
+	for _, bad := range []string{"EXPLAIN QUERY PLAN SELECT * FROM missing", "EXPLAIN QUERY PLAN DELETE FROM missing", "EXPLAIN QUERY PLAN UPDATE t SET nope = 1", "EXPLAIN QUERY PLAN INSERT INTO t VALUES (1,1,'x')"} {
+		if _, err := db.Query(bg, bad); err == nil {
+			t.Fatalf("%s: expected error", bad)
+		}
+	}
+}

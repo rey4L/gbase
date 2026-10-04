@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -273,6 +274,9 @@ func (s *shell) execute(ctx context.Context, statement string) (bool, error) {
 
 func printRows(out io.Writer, rows *gbase.Rows) (err error) {
 	defer func() { err = errors.Join(err, rows.Close()) }()
+	if slices.Equal(rows.Columns(), queryPlanColumns) {
+		return printPlan(out, rows)
+	}
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	write := func(cells []string) error { _, err := fmt.Fprintln(w, strings.Join(cells, "\t")); return err }
 	columns := rows.Columns()
@@ -293,6 +297,52 @@ func printRows(out io.Writer, rows *gbase.Rows) (err error) {
 		}
 	}
 	return errors.Join(rows.Err(), w.Flush())
+}
+
+// queryPlanColumns identifies EXPLAIN QUERY PLAN output, which is drawn as a tree like the SQLite shell does.
+var queryPlanColumns = []string{"id", "parent", "notused", "detail"}
+
+func printPlan(out io.Writer, rows *gbase.Rows) error {
+	type node struct {
+		id, parent int64
+		detail     string
+	}
+	var nodes []node
+	for rows.Next() {
+		v := rows.Values()
+		id, _ := v[0].(int64)
+		parent, _ := v[1].(int64)
+		nodes = append(nodes, node{id, parent, display(v[3])})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	var draw func(parent int64, prefix string) error
+	draw = func(parent int64, prefix string) error {
+		var kids []node
+		for _, n := range nodes {
+			if n.parent == parent {
+				kids = append(kids, n)
+			}
+		}
+		for i, n := range kids {
+			branch, next := "|--", "|  "
+			if i == len(kids)-1 {
+				branch, next = "`--", "   "
+			}
+			if _, err := fmt.Fprintf(out, "%s%s%s\n", prefix, branch, n.detail); err != nil {
+				return err
+			}
+			if err := draw(n.id, prefix+next); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if _, err := fmt.Fprintln(out, "QUERY PLAN"); err != nil {
+		return err
+	}
+	return draw(0, "")
 }
 
 func display(value gbase.Value) string {

@@ -2,6 +2,7 @@ package gbase
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"slices"
 	"sort"
@@ -30,6 +31,7 @@ type queryProgram struct {
 	start, end    []byte
 	limit, offset int64
 	grouped       bool
+	seekOp        string // comparison operator of the chosen index term, for EXPLAIN QUERY PLAN
 }
 type queryRow struct {
 	env           evalEnv
@@ -394,6 +396,7 @@ func (p *queryProgram) chooseIndex(tx *Tx, args []Value) {
 			}
 			p.idx = idx
 			p.primary = idx == primary
+			p.seekOp = op
 			return
 		}
 	}
@@ -769,6 +772,106 @@ func (tx *Tx) explainSelect(s *sql.Select, args []Value) (*queryResult, error) {
 		q.rows = append(q.rows, []Value{int64(i), op.code, op.detail})
 	}
 	return q, nil
+}
+
+type planNode struct {
+	id, parent int64
+	detail     string
+}
+
+func tableLabel(t sql.TableRef) string {
+	if t.Alias != "" {
+		return t.Alias
+	}
+	return t.Name
+}
+
+// queryPlan describes the access path the way SQLite's EXPLAIN QUERY PLAN does:
+// one node per table access in join order, then the temp b-trees the executor builds.
+func (p *queryProgram) queryPlan() []planNode {
+	s := p.stmt
+	var nodes []planNode
+	add := func(detail string) { nodes = append(nodes, planNode{id: int64(len(nodes) + 1), detail: detail}) }
+	switch {
+	case s.From.Name == "":
+		add("SCAN CONSTANT ROW")
+	case p.idx == nil:
+		add("SCAN " + tableLabel(s.From))
+	default:
+		col, using := p.idx.Column, "INDEX "+p.idx.Name
+		if p.primary {
+			col, using = "rowid", "INTEGER PRIMARY KEY"
+		}
+		cmp := p.seekOp
+		switch cmp {
+		case ">=":
+			cmp = ">"
+		case "<=":
+			cmp = "<"
+		}
+		add(fmt.Sprintf("SEARCH %s USING %s (%s%s?)", tableLabel(s.From), using, col, cmp))
+	}
+	for _, j := range s.Joins {
+		add("SCAN " + tableLabel(j.Table))
+	}
+	if len(s.GroupBy) > 0 {
+		add("USE TEMP B-TREE FOR GROUP BY")
+	}
+	if s.Distinct {
+		add("USE TEMP B-TREE FOR DISTINCT")
+	}
+	if len(s.OrderBy) > 0 {
+		add("USE TEMP B-TREE FOR ORDER BY")
+	}
+	return nodes
+}
+
+func (tx *Tx) explainQueryPlan(stmt sql.Statement, args []Value) (*queryResult, error) {
+	switch s := stmt.(type) {
+	case *sql.Select:
+		p, e := tx.compileSelect(s, args)
+		if e != nil {
+			return nil, e
+		}
+		return queryPlanResult(p.queryPlan()), nil
+	case *sql.Update, *sql.Delete:
+		// Mutations always scan the whole table; validate them without writing.
+		var table string
+		var where sql.Expr
+		if u, ok := s.(*sql.Update); ok {
+			table, where = u.Table, u.Where
+		} else {
+			d := s.(*sql.Delete)
+			table, where = d.Table, d.Where
+		}
+		t, e := tx.getTable(table)
+		if e != nil {
+			return nil, e
+		}
+		if u, ok := s.(*sql.Update); ok {
+			for _, a := range u.Assignments {
+				if t.col(a.Column) < 0 {
+					return nil, fail("schema", "unknown update column %s", a.Column)
+				}
+				if e := bindExpr(a.Value, rowEnv(t, nil), false); e != nil {
+					return nil, e
+				}
+			}
+		}
+		if e := bindExpr(where, rowEnv(t, nil), false); e != nil {
+			return nil, e
+		}
+		return queryPlanResult([]planNode{{id: 1, detail: "SCAN " + t.Name}}), nil
+	}
+	return nil, fmt.Errorf("EXPLAIN QUERY PLAN supports SELECT, UPDATE and DELETE")
+}
+
+func queryPlanResult(nodes []planNode) *queryResult {
+	q := &queryResult{columns: []string{"id", "parent", "notused", "detail"}}
+	for _, n := range nodes {
+		q.rows = append(q.rows, []Value{n.id, n.parent, int64(0), n.detail})
+	}
+	return q
 }
 
 var _ context.Context

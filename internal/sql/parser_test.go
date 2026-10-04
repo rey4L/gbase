@@ -29,6 +29,7 @@ func TestStatements(t *testing.T) {
 		{"INSERT INTO t (a,b) VALUES (1,'one'), (2,NULL)", &Insert{Table: "t", Columns: []string{"a", "b"}, Rows: [][]Expr{{&Literal{Value: int64(1)}, &Literal{Value: "one"}}, {&Literal{Value: int64(2)}, &Literal{Value: nil}}}}},
 		{"UPDATE t SET a=a+1,b=? WHERE id=?", &Update{Table: "t", Assignments: []Assignment{{Column: "a", Value: &Binary{Op: "+", Left: &Column{Name: "a"}, Right: &Literal{Value: int64(1)}}}, {Column: "b", Value: &Parameter{Index: 0}}}, Where: &Binary{Op: "=", Left: &Column{Name: "id"}, Right: &Parameter{Index: 1}}}},
 		{"DELETE FROM t WHERE a IS NULL", &Delete{Table: "t", Where: &Unary{Op: "IS NULL", X: &Column{Name: "a"}}}},
+		{"explain query plan SELECT * FROM t", &Explain{Statement: &Select{Columns: []SelectItem{{Expr: &Star{}}}, From: TableRef{Name: "t"}}, QueryPlan: true}},
 		{"EXPLAIN SELECT * FROM t", &Explain{Statement: &Select{Columns: []SelectItem{{Expr: &Star{}}}, From: TableRef{Name: "t"}}}},
 	}
 	for _, tt := range tests {
@@ -210,7 +211,7 @@ func TestRejectUnsupportedAndMalformed(t *testing.T) {
 		"CREATE TABLE t (x INTEGER REFERENCES u(a) ON DELETE RESTRICT ON DELETE RESTRICT)", "CREATE TABLE t (x INTEGER,CONSTRAINT c UNIQUE(x))",
 		"CREATE INDEX i ON t ()", "CREATE INDEX i ON t (a DESC)", "DROP UNIQUE TABLE t", "ALTER TABLE t ADD x TEXT",
 		"INSERT t VALUES(1)", "INSERT INTO t VALUES()", "INSERT INTO t VALUES(1),(1,2)", "INSERT INTO t(a,b) VALUES(1)",
-		"INSERT INTO t SELECT 1", "INSERT INTO t DEFAULT VALUES", "UPDATE t SET", "UPDATE t SET a=", "DELETE t", "EXPLAIN EXPLAIN SELECT 1", "EXPLAIN QUERY PLAN SELECT 1",
+		"INSERT INTO t SELECT 1", "INSERT INTO t DEFAULT VALUES", "UPDATE t SET", "UPDATE t SET a=", "DELETE t", "EXPLAIN EXPLAIN SELECT 1", "EXPLAIN QUERY SELECT 1", "EXPLAIN QUERY PLAN EXPLAIN SELECT 1",
 	}
 	for _, input := range tests {
 		t.Run(input, func(t *testing.T) {

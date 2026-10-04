@@ -121,7 +121,12 @@ type Delete struct {
 	Table string
 	Where Expr
 }
-type Explain struct{ Statement Statement }
+
+// QueryPlan is set for EXPLAIN QUERY PLAN, which reports a SQLite-style access plan.
+type Explain struct {
+	Statement Statement
+	QueryPlan bool
+}
 
 func (*CreateTable) statement() {}
 func (*DropTable) statement()   {}

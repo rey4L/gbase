@@ -202,3 +202,15 @@ func TestDisplay(t *testing.T) {
 		}
 	}
 }
+
+func TestExplainQueryPlanTree(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "plan.db")
+	code, out, stderr := script(t, path, `
+CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT);
+EXPLAIN QUERY PLAN SELECT * FROM t WHERE id > 1 ORDER BY a;
+`)
+	want := "QUERY PLAN\n|--SEARCH t USING INTEGER PRIMARY KEY (rowid>?)\n`--USE TEMP B-TREE FOR ORDER BY\n"
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, stderr)
+	}
+}
