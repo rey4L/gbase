@@ -1,6 +1,7 @@
 package gbase
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"reflect"
@@ -31,7 +32,7 @@ type queryProgram struct {
 	start, end    []byte
 	limit, offset int64
 	grouped       bool
-	seekOp        string // comparison operator of the chosen index term, for EXPLAIN QUERY PLAN
+	seekOps       []string // comparison operators of the index terms used, for EXPLAIN QUERY PLAN
 }
 type queryRow struct {
 	env           evalEnv
@@ -317,6 +318,8 @@ func (p *queryProgram) chooseIndex(tx *Tx, args []Value) {
 		}
 	}
 	for _, idx := range candidates {
+		var lo, hi []byte
+		var ops []string
 		for _, term := range terms {
 			b, ok := term.(*sql.Binary)
 			if !ok {
@@ -377,28 +380,44 @@ func (p *queryProgram) chooseIndex(tx *Tx, args []Value) {
 				typeStart = nil
 				typeEnd = nil
 			}
+			var start, end []byte
 			switch op {
 			case "=":
-				p.start, p.end = prefix, prefixEnd(prefix)
+				start, end = prefix, prefixEnd(prefix)
 			case ">":
-				p.start, p.end = prefixEnd(prefix), typeEnd
-				if idx == primary && p.start == nil {
-					p.start = append(append([]byte(nil), prefix...), 0)
+				start, end = prefixEnd(prefix), typeEnd
+				if idx == primary && start == nil {
+					start = append(append([]byte(nil), prefix...), 0)
 				}
 			case ">=":
-				p.start, p.end = prefix, typeEnd
+				start, end = prefix, typeEnd
 			case "<":
-				p.start, p.end = typeStart, prefix
+				start, end = typeStart, prefix
 			case "<=":
-				p.start, p.end = typeStart, prefixEnd(prefix)
+				start, end = typeStart, prefixEnd(prefix)
 			default:
 				continue
 			}
-			p.idx = idx
-			p.primary = idx == primary
-			p.seekOp = op
-			return
+			// Every term only narrows the range; the WHERE clause is still applied as a filter.
+			if start != nil && (lo == nil || bytes.Compare(start, lo) > 0) {
+				lo = start
+			}
+			if end != nil && (hi == nil || bytes.Compare(end, hi) < 0) {
+				hi = end
+			}
+			ops = append(ops, op)
 		}
+		if len(ops) == 0 {
+			continue
+		}
+		if lo != nil && hi != nil && bytes.Compare(lo, hi) > 0 {
+			hi = lo
+		}
+		p.start, p.end = lo, hi
+		p.idx = idx
+		p.primary = idx == primary
+		p.seekOps = ops
+		return
 	}
 }
 
@@ -802,14 +821,27 @@ func (p *queryProgram) queryPlan() []planNode {
 		if p.primary {
 			col, using = "rowid", "INTEGER PRIMARY KEY"
 		}
-		cmp := p.seekOp
-		switch cmp {
-		case ">=":
-			cmp = ">"
-		case "<=":
-			cmp = "<"
+		var cond []string
+		var lower, upper bool
+		for _, op := range p.seekOps {
+			switch op {
+			case "=":
+				cond = []string{col + "=?"}
+				lower, upper = true, true
+			case ">", ">=":
+				if !lower {
+					cond, lower = append(cond, col+">?"), true
+				}
+			case "<", "<=":
+				if !upper {
+					cond, upper = append(cond, col+"<?"), true
+				}
+			}
+			if len(cond) == 1 && cond[0] == col+"=?" {
+				break
+			}
 		}
-		add(fmt.Sprintf("SEARCH %s USING %s (%s%s?)", tableLabel(s.From), using, col, cmp))
+		add(fmt.Sprintf("SEARCH %s USING %s (%s)", tableLabel(s.From), using, strings.Join(cond, " AND ")))
 	}
 	for _, j := range s.Joins {
 		add("SCAN " + tableLabel(j.Table))

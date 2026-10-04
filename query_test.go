@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -165,6 +166,58 @@ func TestExplainQueryPlan(t *testing.T) {
 	for _, bad := range []string{"EXPLAIN QUERY PLAN SELECT * FROM missing", "EXPLAIN QUERY PLAN DELETE FROM missing", "EXPLAIN QUERY PLAN UPDATE t SET nope = 1", "EXPLAIN QUERY PLAN INSERT INTO t VALUES (1,1,'x')"} {
 		if _, err := db.Query(bg, bad); err == nil {
 			t.Fatalf("%s: expected error", bad)
+		}
+	}
+}
+
+func TestCombinedRangeBounds(t *testing.T) {
+	db := openTest(t)
+	execTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY, n INTEGER, s TEXT)")
+	tx, e := db.Begin(bg)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for i := -5; i <= 20; i++ {
+		if _, e = tx.Exec(bg, "INSERT INTO t VALUES (?,?,?)", i, i%7, string(rune('a'+(i+5)%6))); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if e = tx.Commit(); e != nil {
+		t.Fatal(e)
+	}
+	where := []string{
+		"id >= 3 AND id < 9", "id > 3 AND id <= 9", "id > 9 AND id < 3", "id >= 4 AND id <= 4", "id = 4 AND id > 2", "id = 4 AND id > 6",
+		"id = 1 AND id = 2", "id > 2 AND id > 6 AND id < 15 AND id < 10", "5 < id AND 12 >= id", "id >= -100 AND id < 100", "id > 20 AND id < 30",
+		"id >= 2 AND id < 15 AND n = 3", "n >= 2 AND n < 5", "n > 4 AND n < 2", "s >= 'b' AND s < 'e'", "n = 3 AND n >= 2 AND n < 3",
+	}
+	// Expectations come from full scans: before the secondary indexes exist, and with
+	// id wrapped in an expression so the primary key cannot be used for a seek.
+	idRef := regexp.MustCompile(`\bid\b`)
+	expect := map[string][][]Value{}
+	for _, w := range where {
+		expect[w] = queryTest(t, db, "SELECT id FROM t WHERE "+idRef.ReplaceAllString(w, "(id+0)")+" ORDER BY id")
+	}
+	check := func(stage string) {
+		for _, w := range where {
+			if got := queryTest(t, db, "SELECT id FROM t WHERE "+w+" ORDER BY id"); !reflect.DeepEqual(got, expect[w]) {
+				t.Fatalf("%s %s: %v want %v", stage, w, got, expect[w])
+			}
+		}
+	}
+	check("primary")
+	execTest(t, db, "CREATE INDEX n_idx ON t(n)")
+	execTest(t, db, "CREATE INDEX s_idx ON t(s)")
+	check("indexed")
+	plans := []struct{ sql, want string }{
+		{"id >= 3 AND id < 9", "SEARCH t USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"},
+		{"id > 3", "SEARCH t USING INTEGER PRIMARY KEY (rowid>?)"},
+		{"id > 2 AND id > 6 AND id = 7", "SEARCH t USING INTEGER PRIMARY KEY (rowid=?)"},
+		{"n >= 2 AND n < 5", "SEARCH t USING INDEX n_idx (n>? AND n<?)"},
+	}
+	for _, p := range plans {
+		rows := queryTest(t, db, "EXPLAIN QUERY PLAN SELECT * FROM t WHERE "+p.sql)
+		if rows[0][3] != p.want {
+			t.Fatalf("%s: %v want %s", p.sql, rows[0][3], p.want)
 		}
 	}
 }
