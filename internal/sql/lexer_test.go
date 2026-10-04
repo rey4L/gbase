@@ -88,3 +88,30 @@ func FuzzLex(f *testing.F) {
 		}
 	})
 }
+
+func TestNamedParameters(t *testing.T) {
+	tokens, err := Lex("SELECT :a, @b, $a, :c1 FROM t WHERE x = ':no' -- :no\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	var indexes []int
+	for _, tok := range tokens {
+		if tok.Kind == TokenParameter {
+			got = append(got, tok.Text)
+			indexes = append(indexes, tok.Value.(int))
+		}
+	}
+	if !reflect.DeepEqual(got, []string{":a", "@b", "$a", ":c1"}) || !reflect.DeepEqual(indexes, []int{0, 1, 0, 2}) {
+		t.Fatalf("%q %v", got, indexes)
+	}
+	for _, bad := range []string{"SELECT ?, :a", "SELECT :a, ?", "SELECT :", "SELECT :1", "SELECT @ x"} {
+		if _, err := Lex(bad); err == nil {
+			t.Errorf("%q lexed", bad)
+		}
+	}
+	s, err := Parse("SELECT * FROM t WHERE a = :x OR b = :x LIMIT :n")
+	if err != nil || ParameterCount(s) != 2 {
+		t.Fatalf("%v %v", err, s)
+	}
+}

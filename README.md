@@ -27,6 +27,8 @@ for rows.Next() { fmt.Println(rows.Values()) }
 if err := rows.Err(); err != nil { panic(err) }
 ```
 
+Parameters are `?` or named (`:name`, `@name`, `$name`; a repeated name is one parameter), not both in one statement.
+
 Use `Begin(ctx)`, transaction `Exec`/`Query`, then `Commit` or `Rollback`. Close query cursors before issuing another operation. Only one transaction runs at a time; `SetBusyTimeout(d)` makes a waiting `Begin` fail with `ErrLocked` after `d` instead of waiting for its context.
 
 `BackupFile(ctx, path)` atomically writes a consistent copy while the database stays open; writers wait for it. `Backup(ctx, w)` streams the same copy to any writer.

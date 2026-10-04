@@ -22,7 +22,9 @@ const (
 )
 
 // Token.Pos is a zero-based byte offset. Literal Value has the same representation
-// as Literal.Value; parameter Value is its zero-based lexical index.
+// as Literal.Value; parameter Value is its zero-based index. Each ? takes the
+// next index; a named parameter (:name, @name, or $name) takes the next index
+// at its first use, and later uses of the name share it.
 type Token struct {
 	Kind  TokenKind
 	Text  string
@@ -52,6 +54,7 @@ var keywords = func() map[string]bool {
 func Lex(input string) ([]Token, error) {
 	tokens := make([]Token, 0)
 	param := 0
+	named := map[string]int{}
 	fail := func(pos int, message string) ([]Token, error) { return nil, &Error{Pos: pos, Message: message} }
 	for i := 0; i < len(input); {
 		start := i
@@ -197,9 +200,39 @@ func Lex(input string) ([]Token, error) {
 			continue
 		}
 		if r == '?' {
+			if len(named) > 0 {
+				return fail(i, "cannot mix ? and named parameters")
+			}
 			tokens = append(tokens, Token{Kind: TokenParameter, Text: "?", Pos: i, Value: param})
 			param++
 			i++
+			continue
+		}
+		if r == ':' || r == '@' || r == '$' {
+			j := i + 1
+			for j < len(input) {
+				rr, n := utf8.DecodeRuneInString(input[j:])
+				if !unicode.IsLetter(rr) && rr != '_' && (j == i+1 || !unicode.IsDigit(rr)) {
+					break
+				}
+				j += n
+			}
+			if j == i+1 {
+				return fail(i, fmt.Sprintf("unexpected character %q", r))
+			}
+			if param > len(named) {
+				return fail(i, "cannot mix ? and named parameters")
+			}
+			// The same name, with any prefix, is the same parameter, as in SQLite.
+			name := input[i+1 : j]
+			index, ok := named[name]
+			if !ok {
+				index = param
+				named[name] = index
+				param++
+			}
+			tokens = append(tokens, Token{Kind: TokenParameter, Text: input[i:j], Pos: i, Value: index})
+			i = j
 			continue
 		}
 		if i+1 < len(input) {
