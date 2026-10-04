@@ -31,6 +31,13 @@ func TestStatements(t *testing.T) {
 		{"DELETE FROM t WHERE a IS NULL", &Delete{Table: "t", Where: &Unary{Op: "IS NULL", X: &Column{Name: "a"}}}},
 		{"explain query plan SELECT * FROM t", &Explain{Statement: &Select{Columns: []SelectItem{{Expr: &Star{}}}, From: TableRef{Name: "t"}}, QueryPlan: true}},
 		{"EXPLAIN SELECT * FROM t", &Explain{Statement: &Select{Columns: []SelectItem{{Expr: &Star{}}}, From: TableRef{Name: "t"}}}},
+		{"ALTER TABLE t ADD COLUMN x TEXT NOT NULL DEFAULT 'a'", &AlterTable{Table: "t", Action: "ADD COLUMN", Column: ColumnDef{Name: "x", Type: "TEXT", NotNull: true, Default: &Literal{Value: "a"}}}},
+		{"alter table t add x INTEGER REFERENCES p(id)", &AlterTable{Table: "t", Action: "ADD COLUMN", Column: ColumnDef{Name: "x", Type: "INTEGER", References: &ForeignKey{Table: "p", Column: "id"}}}},
+		{"ALTER TABLE t DROP COLUMN x", &AlterTable{Table: "t", Action: "DROP COLUMN", From: "x"}},
+		{"ALTER TABLE t DROP x", &AlterTable{Table: "t", Action: "DROP COLUMN", From: "x"}},
+		{"ALTER TABLE t RENAME TO u", &AlterTable{Table: "t", Action: "RENAME TO", To: "u"}},
+		{"ALTER TABLE t RENAME COLUMN a TO b", &AlterTable{Table: "t", Action: "RENAME COLUMN", From: "a", To: "b"}},
+		{"ALTER TABLE t RENAME a TO b", &AlterTable{Table: "t", Action: "RENAME COLUMN", From: "a", To: "b"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -197,6 +204,7 @@ func TestRejectUnsupportedAndMalformed(t *testing.T) {
 		"", ";", "SELECT", "SELECT 1; SELECT 2", "SELECT 1;;", "SELECT 1 garbage extra", "SELECT * FROM",
 		"SELECT * FROM t RIGHT JOIN u ON t.a=u.a", "SELECT * FROM t CROSS JOIN u", "SELECT * FROM t,u",
 		"SELECT * FROM t LEFT JOIN u", "SELECT * FROM t JOIN u USING(a)", "SELECT (SELECT a FROM t)",
+		"ALTER TABLE t", "ALTER t ADD x TEXT", "ALTER TABLE t ADD x", "ALTER TABLE t RENAME a b", "ALTER TABLE t MODIFY x TEXT",
 		"SELECT 1 UNION SELECT 2", "SELECT a IS 1",
 		"SELECT a IS NOT", "SELECT *+1", "SELECT COUNT(DISTINCT a)", "SELECT abs(,a)", "SELECT abs(a,)", "SELECT f(*,a)", "SELECT f(a,*)", "SELECT f(",
 		"SELECT t.* AS x", "SELECT TRUE", "SELECT 1e", "SELECT 1e9999", "SELECT 9223372036854775808", "SELECT 9223372036854775809",
@@ -209,7 +217,7 @@ func TestRejectUnsupportedAndMalformed(t *testing.T) {
 		"CREATE TABLE t (x INTEGER,PRIMARY KEY(x,y))", "CREATE TABLE t (x INTEGER,UNIQUE(x,y))", "CREATE TABLE t (x INTEGER,PRIMARY KEY(y))",
 		"CREATE TABLE t (x INTEGER REFERENCES u(a,b))", "CREATE TABLE t (x INTEGER REFERENCES u(a) ON DELETE CASCADE)",
 		"CREATE TABLE t (x INTEGER REFERENCES u(a) ON DELETE RESTRICT ON DELETE RESTRICT)", "CREATE TABLE t (x INTEGER,CONSTRAINT c UNIQUE(x))",
-		"CREATE INDEX i ON t ()", "CREATE INDEX i ON t (a DESC)", "DROP UNIQUE TABLE t", "ALTER TABLE t ADD x TEXT",
+		"CREATE INDEX i ON t ()", "CREATE INDEX i ON t (a DESC)", "DROP UNIQUE TABLE t",
 		"INSERT t VALUES(1)", "INSERT INTO t VALUES()", "INSERT INTO t VALUES(1),(1,2)", "INSERT INTO t(a,b) VALUES(1)",
 		"INSERT INTO t SELECT 1", "INSERT INTO t DEFAULT VALUES", "UPDATE t SET", "UPDATE t SET a=", "DELETE t", "EXPLAIN EXPLAIN SELECT 1", "EXPLAIN QUERY SELECT 1", "EXPLAIN QUERY PLAN EXPLAIN SELECT 1",
 	}

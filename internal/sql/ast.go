@@ -122,6 +122,14 @@ type Delete struct {
 	Where Expr
 }
 
+// AlterTable.Action is ADD COLUMN (Column), DROP COLUMN (From), RENAME TO (To),
+// or RENAME COLUMN (From, To).
+type AlterTable struct {
+	Table, Action string
+	Column        ColumnDef
+	From, To      string
+}
+
 // QueryPlan is set for EXPLAIN QUERY PLAN, which reports a SQLite-style access plan.
 type Explain struct {
 	Statement Statement
@@ -136,4 +144,5 @@ func (*Insert) statement()      {}
 func (*Select) statement()      {}
 func (*Update) statement()      {}
 func (*Delete) statement()      {}
+func (*AlterTable) statement()  {}
 func (*Explain) statement()     {}

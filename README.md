@@ -29,6 +29,8 @@ if err := rows.Err(); err != nil { panic(err) }
 
 Use `Begin(ctx)`, transaction `Exec`/`Query`, then `Commit` or `Rollback`. Close query cursors before issuing another operation.
 
+Schema changes: `ALTER TABLE t ADD [COLUMN] def`, `DROP [COLUMN] c`, `RENAME TO name`, `RENAME [COLUMN] c TO name`. Each rewrites the table's rows, so it costs time proportional to the table.
+
 ```sh
 go test ./...
 go test -race ./...

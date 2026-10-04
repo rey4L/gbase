@@ -28,6 +28,8 @@ func WalkStatement(statement Statement, visit func(Expr) bool) {
 		for _, c := range s.Columns {
 			walk(c.Default)
 		}
+	case *AlterTable:
+		walk(s.Column.Default)
 	case *Insert:
 		for _, row := range s.Rows {
 			for _, e := range row {

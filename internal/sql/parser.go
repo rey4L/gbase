@@ -98,6 +98,8 @@ func (p *parser) statement() Statement {
 		return p.update()
 	case p.take("DELETE"):
 		return p.deleteStatement()
+	case p.take("ALTER"):
+		return p.alter()
 	case p.take("EXPLAIN"):
 		plan := p.takeWord("QUERY")
 		if plan && !p.takeWord("PLAN") {
@@ -173,6 +175,39 @@ func (p *parser) drop() Statement {
 	return s
 }
 
+// alter parses ALTER TABLE t ADD [COLUMN] def, DROP [COLUMN] c,
+// RENAME TO name, or RENAME [COLUMN] c TO name.
+func (p *parser) alter() Statement {
+	p.expect("TABLE")
+	s := &AlterTable{Table: p.ident()}
+	switch {
+	case p.takeWord("ADD"):
+		p.takeWord("COLUMN")
+		s.Action = "ADD COLUMN"
+		s.Column = p.columnDef()
+	case p.take("DROP"):
+		p.takeWord("COLUMN")
+		s.Action = "DROP COLUMN"
+		s.From = p.ident()
+	case p.takeWord("RENAME"):
+		if p.takeWord("TO") {
+			s.Action = "RENAME TO"
+			s.To = p.ident()
+			break
+		}
+		p.takeWord("COLUMN")
+		s.Action = "RENAME COLUMN"
+		s.From = p.ident()
+		if !p.takeWord("TO") {
+			p.fail("expected TO, found %q", p.peek().Text)
+		}
+		s.To = p.ident()
+	default:
+		p.fail("expected ADD, DROP, or RENAME, found %q", p.peek().Text)
+	}
+	return s
+}
+
 func (p *parser) createTable() Statement {
 	s := &CreateTable{IfNotExists: p.ifNotExists()}
 	s.Name = p.ident()
@@ -197,46 +232,7 @@ func (p *parser) createTable() Statement {
 			}
 			s.Constraints = append(s.Constraints, c)
 		} else {
-			c := ColumnDef{Name: p.ident()}
-			switch {
-			case p.take("INTEGER"):
-				c.Type = "INTEGER"
-			case p.take("REAL"):
-				c.Type = "REAL"
-			case p.take("TEXT"):
-				c.Type = "TEXT"
-			case p.take("BLOB"):
-				c.Type = "BLOB"
-			default:
-				p.fail("expected INTEGER, REAL, TEXT, or BLOB")
-			}
-			seen := map[string]bool{}
-			for p.err == nil {
-				key := p.peek().Text
-				if key != "PRIMARY" && key != "UNIQUE" && key != "NOT" && key != "DEFAULT" && key != "REFERENCES" || p.peek().Kind != TokenKeyword {
-					break
-				}
-				if seen[key] {
-					p.fail("duplicate column constraint %s", key)
-					break
-				}
-				seen[key] = true
-				p.next()
-				switch key {
-				case "PRIMARY":
-					p.expect("KEY")
-					c.PrimaryKey = true
-				case "UNIQUE":
-					c.Unique = true
-				case "NOT":
-					p.expect("NULL")
-					c.NotNull = true
-				case "DEFAULT":
-					c.Default = p.defaultLiteral()
-				case "REFERENCES":
-					c.References = p.reference()
-				}
-			}
+			c := p.columnDef()
 			s.Columns = append(s.Columns, c)
 		}
 		if !p.take(",") {
@@ -282,6 +278,50 @@ func (p *parser) createTable() Statement {
 		p.fail("only one single-column primary key is supported")
 	}
 	return s
+}
+
+func (p *parser) columnDef() ColumnDef {
+	c := ColumnDef{Name: p.ident()}
+	switch {
+	case p.take("INTEGER"):
+		c.Type = "INTEGER"
+	case p.take("REAL"):
+		c.Type = "REAL"
+	case p.take("TEXT"):
+		c.Type = "TEXT"
+	case p.take("BLOB"):
+		c.Type = "BLOB"
+	default:
+		p.fail("expected INTEGER, REAL, TEXT, or BLOB")
+	}
+	seen := map[string]bool{}
+	for p.err == nil {
+		key := p.peek().Text
+		if key != "PRIMARY" && key != "UNIQUE" && key != "NOT" && key != "DEFAULT" && key != "REFERENCES" || p.peek().Kind != TokenKeyword {
+			break
+		}
+		if seen[key] {
+			p.fail("duplicate column constraint %s", key)
+			break
+		}
+		seen[key] = true
+		p.next()
+		switch key {
+		case "PRIMARY":
+			p.expect("KEY")
+			c.PrimaryKey = true
+		case "UNIQUE":
+			c.Unique = true
+		case "NOT":
+			p.expect("NULL")
+			c.NotNull = true
+		case "DEFAULT":
+			c.Default = p.defaultLiteral()
+		case "REFERENCES":
+			c.References = p.reference()
+		}
+	}
+	return c
 }
 
 func (p *parser) reference() *ForeignKey {

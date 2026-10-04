@@ -33,6 +33,8 @@ func (tx *Tx) execute(stmt sql.Statement, args []Value) (Result, error) {
 		return Result{}, tx.createIndex(s)
 	case *sql.DropIndex:
 		return Result{}, tx.dropIndex(s)
+	case *sql.AlterTable:
+		return Result{}, tx.alterTable(s)
 	case *sql.Insert:
 		return tx.insert(s, args)
 	case *sql.Update:
@@ -66,23 +68,9 @@ func (tx *Tx) createTable(s *sql.CreateTable) error {
 			return fail("schema", "duplicate column %s", d.Name)
 		}
 		seen[n] = true
-		c := column{Name: d.Name, Type: d.Type, Primary: d.PrimaryKey, Unique: d.Unique, NotNull: d.NotNull}
-		if d.Default != nil {
-			v, e := eval(d.Default, evalEnv{}, nil)
-			if e != nil {
-				return e
-			}
-			v, e = coerce(c, v)
-			if e != nil {
-				return e
-			}
-			c.Default, e = encodeRecord([]Value{v})
-			if e != nil {
-				return e
-			}
-		}
-		if d.References != nil {
-			c.Ref = &reference{d.References.Table, d.References.Column}
+		c, e := columnFromDef(d)
+		if e != nil {
+			return e
 		}
 		t.Columns = append(t.Columns, c)
 	}
@@ -124,18 +112,8 @@ func (tx *Tx) createTable(s *sql.CreateTable) error {
 	t.Root = root
 	tx.cat.Tables[name] = t
 	for _, c := range t.Columns {
-		if c.Ref != nil {
-			parent, e := tx.getTable(c.Ref.Table)
-			if e != nil {
-				return e
-			}
-			i := parent.col(c.Ref.Column)
-			if i < 0 || !tx.uniqueColumn(parent, c.Ref.Column) {
-				return fail("constraint", "foreign key must reference primary or unique column")
-			}
-			if parent.Columns[i].Type != c.Type {
-				return fail("constraint", "foreign key types differ")
-			}
+		if e = tx.checkReference(c); e != nil {
+			return e
 		}
 	}
 	for _, c := range t.Columns {
@@ -148,6 +126,46 @@ func (tx *Tx) createTable(s *sql.CreateTable) error {
 				return e
 			}
 		}
+	}
+	return nil
+}
+
+func columnFromDef(d sql.ColumnDef) (column, error) {
+	c := column{Name: d.Name, Type: d.Type, Primary: d.PrimaryKey, Unique: d.Unique, NotNull: d.NotNull}
+	if d.Default != nil {
+		v, e := eval(d.Default, evalEnv{}, nil)
+		if e != nil {
+			return c, e
+		}
+		v, e = coerce(c, v)
+		if e != nil {
+			return c, e
+		}
+		c.Default, e = encodeRecord([]Value{v})
+		if e != nil {
+			return c, e
+		}
+	}
+	if d.References != nil {
+		c.Ref = &reference{d.References.Table, d.References.Column}
+	}
+	return c, nil
+}
+
+func (tx *Tx) checkReference(c column) error {
+	if c.Ref == nil {
+		return nil
+	}
+	parent, e := tx.getTable(c.Ref.Table)
+	if e != nil {
+		return e
+	}
+	i := parent.col(c.Ref.Column)
+	if i < 0 || !tx.uniqueColumn(parent, c.Ref.Column) {
+		return fail("constraint", "foreign key must reference primary or unique column")
+	}
+	if parent.Columns[i].Type != c.Type {
+		return fail("constraint", "foreign key types differ")
 	}
 	return nil
 }
