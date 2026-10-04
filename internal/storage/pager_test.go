@@ -586,3 +586,50 @@ func TestSavepointJournalRelease(t *testing.T) {
 	}
 	must(t, x.Commit())
 }
+
+func TestSetCachePages(t *testing.T) {
+	p, err := Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	tx, _ := p.Begin()
+	var ids []uint32
+	for i := 0; i < 20; i++ {
+		id, err := tx.Alloc()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = tx.Write(id, make([]byte, PageSize)); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err = p.SetCachePages(4); !errors.Is(err, ErrBusy) {
+		t.Fatalf("resize during transaction: %v", err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err = p.SetCachePages(0); err == nil {
+		t.Fatal("zero-page cache accepted")
+	}
+	for _, n := range []int{4, 100} {
+		if err = p.SetCachePages(n); err != nil {
+			t.Fatal(err)
+		}
+		tx, _ = p.Begin()
+		for _, id := range ids {
+			if _, err = tx.Read(id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		tx.Rollback()
+		if want := min(n, len(ids)); len(p.cache) != want || len(p.order) != want {
+			t.Fatalf("limit %d: cache %d order %d", n, len(p.cache), len(p.order))
+		}
+	}
+	if err = p.SetCachePages(2); err != nil || len(p.cache) != 2 {
+		t.Fatalf("shrink: %v %d", err, len(p.cache))
+	}
+}

@@ -19,7 +19,43 @@ type DB struct {
 	closed bool
 	active *Tx
 	busy   atomic.Int64 // nanoseconds Begin waits for the database before ErrLocked; 0 waits for ctx
+	hook   atomic.Pointer[StatementHook]
 }
+
+// StatementHook observes each statement run by Exec or Query: its SQL, the
+// time spent parsing and executing it, and its error. Query's time covers
+// building the result, not reading rows a simple query streams afterwards.
+// Neither includes waiting for the database or committing. The hook runs
+// while its transaction holds the database, so it must not use the DB.
+type StatementHook func(query string, d time.Duration, err error)
+
+// SetStatementHook installs h, or removes the hook when h is nil.
+func (db *DB) SetStatementHook(h StatementHook) {
+	if h == nil {
+		db.hook.Store(nil)
+		return
+	}
+	db.hook.Store(&h)
+}
+
+// SetCachePages sets how many database pages stay cached in memory, 64
+// (256 KiB) by default. It waits for any active transaction to finish.
+func (db *DB) SetCachePages(ctx context.Context, n int) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-db.gate:
+	}
+	defer func() { db.gate <- struct{}{} }()
+	db.mu.Lock()
+	closed := db.closed
+	db.mu.Unlock()
+	if closed {
+		return ErrClosed
+	}
+	return db.pager.SetCachePages(n)
+}
+
 type Tx struct {
 	db     *DB
 	pages  *storage.Tx
@@ -201,7 +237,11 @@ func (tx *Tx) ready(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (tx *Tx) Exec(ctx context.Context, query string, args ...any) (Result, error) {
+func (tx *Tx) Exec(ctx context.Context, query string, args ...any) (r Result, err error) {
+	if hook := tx.db.hook.Load(); hook != nil {
+		start := time.Now()
+		defer func() { (*hook)(query, time.Since(start), err) }()
+	}
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 	if e := tx.ready(ctx); e != nil {
@@ -224,7 +264,7 @@ func (tx *Tx) Exec(ctx context.Context, query string, args ...any) (Result, erro
 	operation, cleanup := operationContext(oldctx, ctx)
 	tx.ctx = operation
 	defer func() { tx.ctx = oldctx; cleanup() }()
-	r, e := tx.execute(stmt, params)
+	r, e = tx.execute(stmt, params)
 	if e == nil {
 		e = tx.ctx.Err()
 	}
@@ -244,7 +284,11 @@ func (tx *Tx) Exec(ctx context.Context, query string, args ...any) (Result, erro
 	return r, nil
 }
 
-func (tx *Tx) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
+func (tx *Tx) Query(ctx context.Context, query string, args ...any) (_ *Rows, err error) {
+	if hook := tx.db.hook.Load(); hook != nil {
+		start := time.Now()
+		defer func() { (*hook)(query, time.Since(start), err) }()
+	}
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 	if e := tx.ready(ctx); e != nil {

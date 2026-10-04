@@ -20,7 +20,7 @@ const PageSize = 4096
 // PageDataSize excludes the final four bytes, which the pager owns as a CRC.
 const (
 	PageDataSize  = PageSize - 4
-	CachePages    = 64
+	CachePages    = 64 // default page cache size; see SetCachePages
 	formatVersion = 1
 )
 
@@ -49,6 +49,7 @@ type Pager struct {
 	free             map[uint32]bool
 	cache            map[uint32][]byte
 	order            []uint32
+	cacheLimit       int
 	active           *Tx
 	closed, poisoned bool
 	Fault            func(point string) error
@@ -156,7 +157,7 @@ func Open(path string) (p *Pager, err error) {
 	if err != nil {
 		return nil, err
 	}
-	p = &Pager{file: f, path: path, free: make(map[uint32]bool), cache: make(map[uint32][]byte)}
+	p = &Pager{file: f, path: path, free: make(map[uint32]bool), cache: make(map[uint32][]byte), cacheLimit: CachePages}
 	if err = p.recover(); err != nil {
 		return nil, err
 	}
@@ -229,6 +230,28 @@ func (p *Pager) check() error {
 		return ErrPoisoned
 	}
 	return nil
+}
+
+// SetCachePages sets how many committed pages the pager keeps in memory,
+// evicting the oldest beyond n. It must not run during a transaction.
+func (p *Pager) SetCachePages(n int) error {
+	if n < 1 {
+		return fmt.Errorf("storage: cache needs at least one page, got %d", n)
+	}
+	if p.active != nil {
+		return ErrBusy
+	}
+	p.cacheLimit = n
+	p.evict(n)
+	return nil
+}
+
+// evict drops the oldest cached pages until at most n remain.
+func (p *Pager) evict(n int) {
+	for len(p.order) > n {
+		delete(p.cache, p.order[0])
+		p.order = p.order[1:]
+	}
 }
 
 // Path is the database file the pager opened.
@@ -312,9 +335,8 @@ func (t *Tx) Read(id uint32) ([]byte, error) {
 	if !valid(b) {
 		return nil, fmt.Errorf("%w: page %d checksum", ErrCorrupt, id)
 	}
-	if len(t.p.order) == CachePages {
-		delete(t.p.cache, t.p.order[0])
-		t.p.order = t.p.order[1:]
+	if len(t.p.order) >= t.p.cacheLimit {
+		t.p.evict(t.p.cacheLimit - 1)
 	}
 	t.p.cache[id] = b
 	t.p.order = append(t.p.order, id)

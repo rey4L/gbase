@@ -459,3 +459,53 @@ func TestBusyTimeout(t *testing.T) {
 		t.Fatalf("waiter after release: %v", e)
 	}
 }
+
+func TestStatementHookAndCachePages(t *testing.T) {
+	db := openTest(t)
+	type call struct {
+		query string
+		err   bool
+	}
+	var calls []call
+	db.SetStatementHook(func(q string, d time.Duration, err error) {
+		if d < 0 {
+			t.Errorf("negative duration for %s", q)
+		}
+		calls = append(calls, call{q, err != nil})
+	})
+	execTest(t, db, "CREATE TABLE t (id INTEGER PRIMARY KEY)")
+	queryTest(t, db, "SELECT id FROM t")
+	if _, e := db.Exec(bg, "INSERT INTO nope VALUES (1)"); e == nil {
+		t.Fatal("insert into missing table")
+	}
+	db.SetStatementHook(nil)
+	execTest(t, db, "INSERT INTO t VALUES (1)")
+	want := []call{{"CREATE TABLE t (id INTEGER PRIMARY KEY)", false}, {"SELECT id FROM t", false}, {"INSERT INTO nope VALUES (1)", true}}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("hook calls %v", calls)
+	}
+
+	if e := db.SetCachePages(bg, 0); e == nil {
+		t.Fatal("zero cache accepted")
+	}
+	if e := db.SetCachePages(bg, 4096); e != nil {
+		t.Fatal(e)
+	}
+	tx, e := db.Begin(bg)
+	if e != nil {
+		t.Fatal(e)
+	}
+	ctx, cancel := context.WithTimeout(bg, 20*time.Millisecond)
+	defer cancel()
+	if e = db.SetCachePages(ctx, 8); !errors.Is(e, context.DeadlineExceeded) {
+		t.Fatalf("resize during transaction: %v", e)
+	}
+	tx.Rollback()
+	if got := queryTest(t, db, "SELECT COUNT(*) FROM t"); got[0][0] != int64(1) {
+		t.Fatal(got)
+	}
+	db.Close()
+	if e = db.SetCachePages(bg, 8); !errors.Is(e, ErrClosed) {
+		t.Fatalf("after close: %v", e)
+	}
+}

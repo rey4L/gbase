@@ -35,6 +35,8 @@ Parameters are `?` or named (`:name`, `@name`, `$name`; a repeated name is one p
 
 Use `Begin(ctx)`, transaction `Exec`/`Query`, then `Commit` or `Rollback`. Close query cursors before issuing another operation. Only one transaction runs at a time; `SetBusyTimeout(d)` makes a waiting `Begin` fail with `ErrLocked` after `d` instead of waiting for its context.
 
+`SetCachePages(ctx, n)` sizes the page cache (64 pages, 256 KiB, by default). `SetStatementHook(f)` reports each statement's SQL, execution time, and error, for logging slow statements.
+
 `BackupFile(ctx, path)` atomically writes a consistent copy while the database stays open; writers wait for it. `Backup(ctx, w)` streams the same copy to any writer.
 
 Indexes and UNIQUE constraints may span columns: `CREATE INDEX i ON t (a, b)`, `UNIQUE (a, b)` in `CREATE TABLE`. A NULL in any column exempts a row from uniqueness. Equalities on leading columns seek the index.
