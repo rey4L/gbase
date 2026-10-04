@@ -28,6 +28,16 @@ type Call struct {
 }
 type Star struct{ Table string }
 
+// Case is CASE [Operand] WHEN ... THEN ... [ELSE ...] END. With an Operand,
+// each When.Cond is compared to it with =; without one, each Cond is a
+// condition. A nil Else yields NULL.
+type Case struct {
+	Operand Expr
+	Whens   []When
+	Else    Expr
+}
+type When struct{ Cond, Result Expr }
+
 func (*Literal) expr()   {}
 func (*Column) expr()    {}
 func (*Parameter) expr() {}
@@ -35,6 +45,7 @@ func (*Unary) expr()     {}
 func (*Binary) expr()    {}
 func (*Call) expr()      {}
 func (*Star) expr()      {}
+func (*Case) expr()      {}
 
 // ForeignKey names a single referenced column. Actions are empty or "RESTRICT".
 type ForeignKey struct{ Table, Column, OnDelete, OnUpdate string }

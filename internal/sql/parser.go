@@ -52,6 +52,12 @@ func (p *parser) take(s string) bool {
 	return false
 }
 
+// isWord reports whether the next token is the unreserved word s.
+func (p *parser) isWord(s string) bool {
+	t := p.peek()
+	return t.Kind == TokenIdentifier && strings.EqualFold(t.Text, s)
+}
+
 // takeWord consumes an unreserved word such as QUERY or PLAN, matched case-insensitively.
 func (p *parser) takeWord(s string) bool {
 	if t := p.peek(); p.err == nil && t.Kind == TokenIdentifier && strings.EqualFold(t.Text, s) {
@@ -645,6 +651,13 @@ func (p *parser) expression(min int) Expr {
 			p.next()
 			left = &Parameter{Index: t.Value.(int)}
 		case TokenIdentifier:
+			// CASE is not reserved, so a column named case still parses; it
+			// starts an expression only when an operand or WHEN follows.
+			if strings.EqualFold(t.Text, "CASE") && caseStart(p.tokens[p.pos+1]) {
+				p.next()
+				left = p.caseExpr()
+				break
+			}
 			name := p.ident()
 			if p.is("(") {
 				left = p.call(name)
@@ -742,4 +755,41 @@ func (p *parser) predicate(left Expr) Expr {
 		x = &Unary{Op: "NOT", X: x}
 	}
 	return x
+}
+
+func caseStart(next Token) bool {
+	switch next.Kind {
+	case TokenIdentifier, TokenLiteral, TokenParameter:
+		return true
+	case TokenKeyword:
+		return next.Text == "NOT" || next.Text == "NULL"
+	case TokenSymbol:
+		return next.Text == "(" || next.Text == "-" || next.Text == "+"
+	}
+	return false
+}
+
+func (p *parser) caseExpr() Expr {
+	c := &Case{}
+	if !p.isWord("WHEN") {
+		c.Operand = p.expression(1)
+	}
+	for p.err == nil && p.takeWord("WHEN") {
+		w := When{Cond: p.expression(1)}
+		if !p.takeWord("THEN") {
+			p.fail("expected THEN, found %q", p.peek().Text)
+		}
+		w.Result = p.expression(1)
+		c.Whens = append(c.Whens, w)
+	}
+	if len(c.Whens) == 0 {
+		p.fail("CASE needs WHEN, found %q", p.peek().Text)
+	}
+	if p.takeWord("ELSE") {
+		c.Else = p.expression(1)
+	}
+	if !p.takeWord("END") {
+		p.fail("expected END, found %q", p.peek().Text)
+	}
+	return c
 }

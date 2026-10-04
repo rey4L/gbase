@@ -6,17 +6,34 @@ func WalkExpr(expression Expr, visit func(Expr) bool) {
 	if expression == nil || !visit(expression) {
 		return
 	}
+	for _, child := range Children(expression) {
+		WalkExpr(child, visit)
+	}
+}
+
+// Children returns an expression's direct subexpressions, omitting absent ones.
+func Children(expression Expr) []Expr {
 	switch e := expression.(type) {
 	case *Unary:
-		WalkExpr(e.X, visit)
+		return []Expr{e.X}
 	case *Binary:
-		WalkExpr(e.Left, visit)
-		WalkExpr(e.Right, visit)
+		return []Expr{e.Left, e.Right}
 	case *Call:
-		for _, arg := range e.Args {
-			WalkExpr(arg, visit)
+		return e.Args
+	case *Case:
+		var out []Expr
+		if e.Operand != nil {
+			out = append(out, e.Operand)
 		}
+		for _, w := range e.Whens {
+			out = append(out, w.Cond, w.Result)
+		}
+		if e.Else != nil {
+			out = append(out, e.Else)
+		}
+		return out
 	}
+	return nil
 }
 
 // WalkStatement visits every expression in a statement, including descendants

@@ -61,6 +61,8 @@ func containsAggregate(x sql.Expr) bool {
 		return containsAggregate(e.Left) || containsAggregate(e.Right)
 	case *sql.Unary:
 		return containsAggregate(e.X)
+	case *sql.Case:
+		return slices.ContainsFunc(sql.Children(e), containsAggregate)
 	}
 	return false
 }
@@ -87,6 +89,12 @@ func groupedExpr(x sql.Expr, groups []sql.Expr) bool {
 		return groupedExpr(e.Left, groups) && groupedExpr(e.Right, groups)
 	case *sql.Unary:
 		return groupedExpr(e.X, groups)
+	case *sql.Case:
+		for _, child := range sql.Children(e) {
+			if !groupedExpr(child, groups) {
+				return false
+			}
+		}
 	}
 	return true
 }

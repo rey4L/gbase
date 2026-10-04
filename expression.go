@@ -116,6 +116,12 @@ func bindExpr(x sql.Expr, env evalEnv, allowAggregate bool) error {
 				return err
 			}
 		}
+	case *sql.Case:
+		for _, child := range sql.Children(e) {
+			if err := bindExpr(child, env, allowAggregate); err != nil {
+				return err
+			}
+		}
 	case *sql.Star:
 		return fail("query", "unexpected star")
 	case *sql.Literal, *sql.Parameter:
@@ -410,6 +416,8 @@ func eval(x sql.Expr, env evalEnv, args []Value) (Value, error) {
 				return boolValue(c >= 0), nil
 			}
 		}
+	case *sql.Case:
+		return evalCase(e, env, args)
 	case *sql.Call:
 		if aggregate(e.Name) {
 			return evalAggregate(e, env, args)
@@ -538,6 +546,8 @@ func evalAggregate(c *sql.Call, env evalEnv, args []Value) (Value, error) {
 
 func exprName(x sql.Expr) string {
 	switch e := x.(type) {
+	case *sql.Case:
+		return "CASE"
 	case *sql.Column:
 		return e.Name
 	case *sql.Call:
@@ -622,4 +632,38 @@ func like(values []Value) (Value, error) {
 		pi++
 	}
 	return boolValue(pi == len(pat)), nil
+}
+
+// evalCase returns the Result of the first WHEN that matches: whose Cond is
+// true, or equals the operand. A NULL operand or Cond never matches.
+func evalCase(c *sql.Case, env evalEnv, args []Value) (Value, error) {
+	var operand Value
+	if c.Operand != nil {
+		var err error
+		if operand, err = eval(c.Operand, env, args); err != nil {
+			return nil, err
+		}
+	}
+	for _, w := range c.Whens {
+		v, err := eval(w.Cond, env, args)
+		if err != nil {
+			return nil, err
+		}
+		matched := false
+		if c.Operand == nil {
+			if matched, err = truth(v); err != nil {
+				return nil, err
+			}
+		} else if operand != nil && v != nil {
+			cmp, err := compareValues(operand, v)
+			if err != nil {
+				return nil, err
+			}
+			matched = cmp == 0
+		}
+		if matched {
+			return eval(w.Result, env, args)
+		}
+	}
+	return eval(c.Else, env, args)
 }

@@ -367,3 +367,51 @@ func TestLikeInBetween(t *testing.T) {
 		}
 	}
 }
+
+func TestCase(t *testing.T) {
+	db := openTest(t)
+	execTest(t, db, "CREATE TABLE p (id INTEGER PRIMARY KEY, status TEXT, premium INTEGER, paid INTEGER, \"case\" TEXT)")
+	execTest(t, db, "INSERT INTO p (status, premium, paid, \"case\") VALUES ('active',100,100,'x'),('active',200,50,'y'),('expired',300,0,NULL),(NULL,40,NULL,'z')")
+	tests := []struct {
+		sql  string
+		args []any
+		want [][]Value
+	}{
+		{"SELECT id, CASE WHEN paid >= premium THEN 'paid' WHEN paid > 0 THEN 'partial' ELSE 'unpaid' END FROM p ORDER BY id", nil,
+			[][]Value{{int64(1), "paid"}, {int64(2), "partial"}, {int64(3), "unpaid"}, {int64(4), "unpaid"}}},
+		{"SELECT CASE status WHEN 'active' THEN 1 WHEN ? THEN 2 END AS s FROM p ORDER BY id", []any{"expired"},
+			[][]Value{{int64(1)}, {int64(1)}, {int64(2)}, {nil}}},
+		{"SELECT CASE NULL WHEN NULL THEN 'match' ELSE 'no' END", nil, [][]Value{{"no"}}},
+		{"SELECT status, SUM(CASE WHEN COALESCE(paid, 0) < premium THEN premium - COALESCE(paid, 0) ELSE 0 END) AS owed FROM p GROUP BY status ORDER BY status", nil,
+			[][]Value{{nil, int64(40)}, {"active", int64(150)}, {"expired", int64(300)}}},
+		{"SELECT CASE WHEN COUNT(*) > 2 THEN 'many' ELSE 'few' END FROM p", nil, [][]Value{{"many"}}},
+		{"SELECT CASE WHEN premium > 150 THEN 'big' ELSE 'small' END AS size, COUNT(*) FROM p GROUP BY CASE WHEN premium > 150 THEN 'big' ELSE 'small' END ORDER BY size", nil,
+			[][]Value{{"big", int64(2)}, {"small", int64(2)}}},
+		{"SELECT id FROM p ORDER BY CASE status WHEN 'expired' THEN 0 ELSE 1 END, id DESC", nil,
+			[][]Value{{int64(3)}, {int64(4)}, {int64(2)}, {int64(1)}}},
+		{"SELECT CASE WHEN 1 THEN CASE WHEN 0 THEN 'a' ELSE 'b' END END", nil, [][]Value{{"b"}}},
+		{"SELECT \"case\", case FROM p WHERE id = 1", nil, [][]Value{{"x", "x"}}},
+		{"SELECT id FROM p WHERE CASE WHEN status IS NULL THEN 1 ELSE 0 END", nil, [][]Value{{int64(4)}}},
+	}
+	for _, tt := range tests {
+		if got := queryTest(t, db, tt.sql, tt.args...); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("%s:\n got %v\nwant %v", tt.sql, got, tt.want)
+		}
+	}
+	for _, q := range []string{"SELECT CASE END", "SELECT CASE WHEN 1 END", "SELECT CASE WHEN 1 THEN 2", "SELECT CASE 1 ELSE 2 END", "SELECT CASE WHEN status THEN 1 END FROM p GROUP BY id", "SELECT CASE WHEN SUM(paid) THEN 1 END FROM p WHERE SUM(paid) > 0"} {
+		if _, err := db.Query(context.Background(), q); err == nil {
+			t.Errorf("%s accepted", q)
+		}
+	}
+	if got := queryTest(t, db, "SELECT CASE WHEN 1 THEN 2 END"); !reflect.DeepEqual(got, [][]Value{{int64(2)}}) {
+		t.Fatal(got)
+	}
+	r, err := db.Query(context.Background(), "SELECT CASE WHEN 1 THEN 2 END")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cols := r.Columns(); cols[0] != "CASE" {
+		t.Errorf("column name %q", cols)
+	}
+	r.Close()
+}
