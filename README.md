@@ -27,6 +27,8 @@ for rows.Next() { fmt.Println(rows.Values()) }
 if err := rows.Err(); err != nil { panic(err) }
 ```
 
+With `database/sql`, import `_ "github.com/rey4L/gbase/sqldriver"` and `sql.Open("gbase", "demo.db?busy_timeout=5s")`; see the package documentation for parameters, type mapping, and `Conn.Raw` access to `Backup`.
+
 Parameters are `?` or named (`:name`, `@name`, `$name`; a repeated name is one parameter), not both in one statement.
 
 Use `Begin(ctx)`, transaction `Exec`/`Query`, then `Commit` or `Rollback`. Close query cursors before issuing another operation. Only one transaction runs at a time; `SetBusyTimeout(d)` makes a waiting `Begin` fail with `ErrLocked` after `d` instead of waiting for its context.
