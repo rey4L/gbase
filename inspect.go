@@ -98,7 +98,7 @@ func (db *DB) Schema(ctx context.Context) ([]string, error) {
 		t := tx.cat.Tables[n]
 		var defs []string
 		for _, c := range t.Columns {
-			d := quoteIdent(c.Name) + " " + c.Type
+			d := quoteIdent(c.Name) + " " + c.typeName()
 			if c.Primary {
 				d += " PRIMARY KEY"
 			} else if c.Unique {

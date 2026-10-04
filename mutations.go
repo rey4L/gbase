@@ -151,7 +151,10 @@ func automaticIndexName(t *table, cols []string) string {
 }
 
 func columnFromDef(d sql.ColumnDef) (column, error) {
-	c := column{Name: d.Name, Type: d.Type, Primary: d.PrimaryKey, Unique: d.Unique, NotNull: d.NotNull}
+	c := column{Name: d.Name, Type: d.Type, Declared: d.Declared, Primary: d.PrimaryKey, Unique: d.Unique, NotNull: d.NotNull}
+	if c.Primary && c.Declared == "BOOLEAN" {
+		return c, fail("schema", "BOOLEAN cannot be a PRIMARY KEY")
+	}
 	if d.Default != nil {
 		v, e := eval(d.Default, evalEnv{}, nil)
 		if e != nil {
@@ -326,6 +329,9 @@ func coerce(c column, v Value) (Value, error) {
 			return nil, fail("constraint", "%s cannot be NULL", c.Name)
 		}
 		return nil, nil
+	}
+	if c.Declared != "" {
+		return coerceDeclared(c, v)
 	}
 	switch c.Type {
 	case "INTEGER":

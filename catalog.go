@@ -12,6 +12,7 @@ type (
 	reference struct{ Table, Column string }
 	column    struct {
 		Name, Type               string
+		Declared                 string `json:",omitempty"`
 		Primary, Unique, NotNull bool
 		Default                  []byte
 		Ref                      *reference
@@ -176,6 +177,9 @@ func (tx *Tx) validateCatalog() error {
 			case "INTEGER", "REAL", "TEXT", "BLOB":
 			default:
 				return fail("corrupt", "unknown column type")
+			}
+			if storage, ok := declaredStorage[c.Declared]; c.Declared != "" && (!ok || storage != c.Type) {
+				return fail("corrupt", "invalid declared column type")
 			}
 			if c.Primary {
 				primary++

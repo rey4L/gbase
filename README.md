@@ -33,6 +33,8 @@ Use `Begin(ctx)`, transaction `Exec`/`Query`, then `Commit` or `Rollback`. Close
 
 Indexes and UNIQUE constraints may span columns: `CREATE INDEX i ON t (a, b)`, `UNIQUE (a, b)` in `CREATE TABLE`. A NULL in any column exempts a row from uniqueness. Equalities on leading columns seek the index.
 
+Column types are INTEGER, REAL, TEXT, and BLOB, plus BOOLEAN (stored as INTEGER 0 or 1), DATE (TEXT `YYYY-MM-DD`), and DATETIME or TIMESTAMP (TEXT, canonical UTC `2006-01-02T15:04:05.000000Z`, so text order is time order). `Rows.DeclTypes` reports declared result types.
+
 Schema changes: `ALTER TABLE t ADD [COLUMN] def`, `DROP [COLUMN] c`, `RENAME TO name`, `RENAME [COLUMN] c TO name`. Each rewrites the table's rows, so it costs time proportional to the table.
 
 ```sh

@@ -15,6 +15,7 @@ import (
 
 type queryResult struct {
 	columns []string
+	types   []string // declared type of each column that is a plain table column, else ""
 	rows    [][]Value
 	next    func() ([]Value, bool, error)
 }
@@ -480,6 +481,18 @@ func (p *queryProgram) chooseIndex(tx *Tx, args []Value) {
 	}
 }
 
+func (p *queryProgram) declTypes() []string {
+	out := make([]string, len(p.items))
+	for i, it := range p.items {
+		if c, ok := it.Expr.(*sql.Column); ok {
+			if b, j, e := resolveColumn(c, p.env); e == nil {
+				out[i] = p.env.bindings[b].table.Columns[j].typeName()
+			}
+		}
+	}
+	return out
+}
+
 func (p *queryProgram) columns() []string {
 	out := make([]string, len(p.items))
 	for i, it := range p.items {
@@ -588,7 +601,7 @@ func (tx *Tx) executeSelect(s *sql.Select, args []Value) (*queryResult, error) {
 	if e != nil {
 		return nil, e
 	}
-	q := &queryResult{columns: p.columns()}
+	q := &queryResult{columns: p.columns(), types: p.declTypes()}
 	ctx := tx.ctx
 	if len(s.Joins) == 0 && !p.grouped && !s.Distinct && len(s.OrderBy) == 0 {
 		var skipped, emitted int64

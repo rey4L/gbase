@@ -39,10 +39,12 @@ func (*Star) expr()      {}
 // ForeignKey names a single referenced column. Actions are empty or "RESTRICT".
 type ForeignKey struct{ Table, Column, OnDelete, OnUpdate string }
 
-// ColumnDef.Type is INTEGER, REAL, TEXT, or BLOB. A nil Default means absent;
-// an explicit DEFAULT NULL is represented by &Literal{Value: nil}.
+// ColumnDef.Type is the storage type: INTEGER, REAL, TEXT, or BLOB. Declared
+// is BOOLEAN (stored as INTEGER), or DATE, DATETIME, or TIMESTAMP (stored as
+// TEXT), and empty for the storage types. A nil Default means absent; an
+// explicit DEFAULT NULL is represented by &Literal{Value: nil}.
 type ColumnDef struct {
-	Name, Type                  string
+	Name, Type, Declared        string
 	PrimaryKey, Unique, NotNull bool
 	Default                     Expr
 	References                  *ForeignKey

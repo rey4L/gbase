@@ -37,6 +37,7 @@ type Rows struct {
 	cleanup func()
 
 	columns []string
+	types   []string
 	rows    [][]Value
 	pos     int
 	current []Value
@@ -265,7 +266,7 @@ func (tx *Tx) Query(ctx context.Context, query string, args ...any) (*Rows, erro
 	if e != nil {
 		return nil, e
 	}
-	rows := &Rows{tx: tx, ctx: operation, cleanup: cleanup, next: q.next, columns: q.columns, rows: q.rows, pos: -1}
+	rows := &Rows{tx: tx, ctx: operation, cleanup: cleanup, next: q.next, columns: q.columns, types: q.types, rows: q.rows, pos: -1}
 	owned = true
 	rows.release = func() { tx.mu.Lock(); tx.cursor = nil; tx.mu.Unlock() }
 	tx.cursor = rows
@@ -332,6 +333,14 @@ func (tx *Tx) Rollback() error {
 	return e
 }
 func (r *Rows) Columns() []string { return append([]string(nil), r.columns...) }
+
+// DeclTypes returns each result column's type as declared in CREATE TABLE,
+// such as TEXT or TIMESTAMP, or "" for a column computed by an expression.
+func (r *Rows) DeclTypes() []string {
+	out := make([]string, len(r.columns))
+	copy(out, r.types)
+	return out
+}
 func (r *Rows) Next() bool {
 	r.tx.mu.Lock()
 	r.mu.Lock()

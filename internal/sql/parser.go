@@ -307,8 +307,16 @@ func (p *parser) columnDef() ColumnDef {
 		c.Type = "TEXT"
 	case p.take("BLOB"):
 		c.Type = "BLOB"
+	case p.takeWord("BOOLEAN"):
+		c.Type, c.Declared = "INTEGER", "BOOLEAN"
+	case p.takeWord("DATE"):
+		c.Type, c.Declared = "TEXT", "DATE"
+	case p.takeWord("DATETIME"):
+		c.Type, c.Declared = "TEXT", "DATETIME"
+	case p.takeWord("TIMESTAMP"):
+		c.Type, c.Declared = "TEXT", "TIMESTAMP"
 	default:
-		p.fail("expected INTEGER, REAL, TEXT, or BLOB")
+		p.fail("expected INTEGER, REAL, TEXT, BLOB, BOOLEAN, DATE, DATETIME, or TIMESTAMP")
 	}
 	seen := map[string]bool{}
 	for p.err == nil {
