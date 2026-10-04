@@ -20,7 +20,7 @@ func TestSQLiteDifferential(t *testing.T) {
 		execTest(t, db, s)
 		script += s + ";"
 	}
-	queries := []string{"SELECT id,score FROM people WHERE team=1 ORDER BY id", "SELECT t.name,COUNT(p.id) AS n,SUM(p.score) AS total FROM teams t LEFT JOIN people p ON p.team=t.id GROUP BY t.name ORDER BY t.name", "SELECT DISTINCT team FROM people ORDER BY team DESC LIMIT 1 OFFSET 1", "SELECT team,AVG(score) AS avg FROM people GROUP BY team HAVING COUNT(*)>1", "SELECT NULL=1 AS a,NULL IS NULL AS b,0 AND NULL AS c,1 OR NULL AS d", "SELECT COUNT(*) AS n,SUM(score) AS s FROM people WHERE id<0"}
+	queries := []string{"SELECT id,score FROM people WHERE team=1 ORDER BY id", "SELECT t.name,COUNT(p.id) AS n,SUM(p.score) AS total FROM teams t LEFT JOIN people p ON p.team=t.id GROUP BY t.name ORDER BY t.name", "SELECT DISTINCT team FROM people ORDER BY team DESC LIMIT 1 OFFSET 1", "SELECT team,AVG(score) AS avg FROM people GROUP BY team HAVING COUNT(*)>1", "SELECT NULL=1 AS a,NULL IS NULL AS b,0 AND NULL AS c,1 OR NULL AS d", "SELECT COUNT(*) AS n,SUM(score) AS s FROM people WHERE id<0", "SELECT name FROM teams WHERE name LIKE 'A%' OR name LIKE '_' ORDER BY id", "SELECT id FROM people WHERE score IN (10,NULL) OR team NOT IN (1) ORDER BY id", "SELECT id FROM people WHERE score BETWEEN 5 AND 15 OR id NOT BETWEEN 1 AND 2 ORDER BY id", "SELECT 2 IN (1,NULL) AS a,1 IN (1,NULL) AS b,NULL BETWEEN 1 AND 2 AS c,'a%' LIKE 'a!%' ESCAPE '!' AS d"}
 	for _, q := range queries {
 		t.Run(q, func(t *testing.T) {
 			out, e := exec.Command(sqlite, "-json", ":memory:", script+q+";").Output()

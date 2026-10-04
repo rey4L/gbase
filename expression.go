@@ -99,6 +99,10 @@ func bindExpr(x sql.Expr, env evalEnv, allowAggregate bool) error {
 				if len(e.Args) == 0 {
 					return fail("query", "COALESCE needs arguments")
 				}
+			case "LIKE":
+				if len(e.Args) != 2 && len(e.Args) != 3 {
+					return fail("query", "invalid LIKE arguments")
+				}
 			case "LOWER", "UPPER", "LENGTH", "ABS":
 				if len(e.Args) != 1 {
 					return fail("query", "%s needs one argument", n)
@@ -424,6 +428,9 @@ func eval(x sql.Expr, env evalEnv, args []Value) (Value, error) {
 		if strings.EqualFold(e.Name, "COALESCE") {
 			return nil, nil
 		}
+		if strings.EqualFold(e.Name, "LIKE") {
+			return like(values)
+		}
 		if len(values) != 1 {
 			return nil, fail("query", "invalid function arguments")
 		}
@@ -545,4 +552,74 @@ func exprName(x sql.Expr) string {
 		return exprName(e.Left) + " " + e.Op + " " + exprName(e.Right)
 	}
 	return "expression"
+}
+
+// like implements SQL LIKE: % matches any run of characters, _ matches one,
+// and ASCII letters compare case-insensitively. An optional third value is a
+// single-character escape. Any NULL operand yields NULL.
+func like(values []Value) (Value, error) {
+	for _, v := range values {
+		if v == nil {
+			return nil, nil
+		}
+	}
+	text, ok := values[0].(string)
+	pattern, ok2 := values[1].(string)
+	if !ok || !ok2 {
+		return nil, fail("type", "LIKE requires text")
+	}
+	escape := rune(-1)
+	if len(values) == 3 {
+		e, ok := values[2].(string)
+		r := []rune(e)
+		if !ok || len(r) != 1 {
+			return nil, fail("query", "ESCAPE requires a single character")
+		}
+		escape = r[0]
+	}
+	type token struct {
+		r       rune
+		literal bool
+	}
+	var pat []token
+	for rs, i := []rune(pattern), 0; i < len(rs); i++ {
+		if rs[i] == escape {
+			if i+1 == len(rs) {
+				return nil, fail("query", "LIKE pattern ends with escape")
+			}
+			i++
+			pat = append(pat, token{rs[i], true})
+			continue
+		}
+		pat = append(pat, token{rs[i], false})
+	}
+	fold := func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}
+	str := []rune(text)
+	// Greedy matching with backtracking to the most recent %, which is linear
+	// in practice and never exponential.
+	si, pi, star, mark := 0, 0, -1, 0
+	for si < len(str) {
+		switch {
+		case pi < len(pat) && !pat[pi].literal && pat[pi].r == '%':
+			star, mark = pi, si
+			pi++
+		case pi < len(pat) && (!pat[pi].literal && pat[pi].r == '_' || fold(pat[pi].r) == fold(str[si])):
+			si++
+			pi++
+		case star >= 0:
+			mark++
+			si, pi = mark, star+1
+		default:
+			return boolValue(false), nil
+		}
+	}
+	for pi < len(pat) && !pat[pi].literal && pat[pi].r == '%' {
+		pi++
+	}
+	return boolValue(pi == len(pat)), nil
 }

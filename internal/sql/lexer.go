@@ -204,13 +204,13 @@ func Lex(input string) ([]Token, error) {
 		}
 		if i+1 < len(input) {
 			op := input[i : i+2]
-			if op == "<=" || op == ">=" || op == "<>" || op == "!=" {
+			if op == "<=" || op == ">=" || op == "<>" || op == "!=" || op == "||" {
 				tokens = append(tokens, Token{Kind: TokenSymbol, Text: op, Pos: i})
 				i += 2
 				continue
 			}
 		}
-		if strings.ContainsRune("(),.;+-*/=<>%", r) && r != '%' {
+		if strings.ContainsRune("(),.;+-*/=<>%", r) {
 			tokens = append(tokens, Token{Kind: TokenSymbol, Text: string(r), Pos: i})
 			i += size
 			continue

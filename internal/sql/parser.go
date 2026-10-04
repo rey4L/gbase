@@ -532,8 +532,10 @@ func precedence(op string) int {
 		return 4
 	case "+", "-":
 		return 5
-	case "*", "/":
+	case "*", "/", "%":
 		return 6
+	case "||":
+		return 7
 	}
 	return 0
 }
@@ -599,6 +601,10 @@ func (p *parser) expression(min int) Expr {
 		if t.Kind != TokenKeyword && t.Kind != TokenSymbol {
 			break
 		}
+		if min <= 4 && predicateStart(t.Text, p.tokens[p.pos+1]) {
+			left = p.predicate(left)
+			continue
+		}
 		prec := precedence(t.Text)
 		if prec == 0 || prec < min {
 			break
@@ -629,4 +635,47 @@ func (p *parser) call(name string) Expr {
 	}
 	p.expect(")")
 	return c
+}
+
+func predicateStart(text string, next Token) bool {
+	switch text {
+	case "LIKE", "IN", "BETWEEN":
+		return true
+	case "NOT":
+		return next.Kind == TokenKeyword && (next.Text == "LIKE" || next.Text == "IN" || next.Text == "BETWEEN")
+	}
+	return false
+}
+
+// predicate parses [NOT] LIKE, IN, and BETWEEN at comparison precedence.
+// IN and BETWEEN desugar to comparisons so they keep three-valued NULL
+// semantics and BETWEEN can use range seeks. LIKE becomes a Call that user SQL
+// cannot spell, since LIKE is a keyword rather than a function identifier.
+func (p *parser) predicate(left Expr) Expr {
+	not := p.take("NOT")
+	var x Expr
+	switch {
+	case p.take("LIKE"):
+		args := []Expr{left, p.expression(5)}
+		if p.takeWord("ESCAPE") {
+			args = append(args, p.expression(5))
+		}
+		x = &Call{Name: "LIKE", Args: args}
+	case p.take("IN"):
+		p.expect("(")
+		x = &Binary{Op: "=", Left: left, Right: p.expression(1)}
+		for p.take(",") {
+			x = &Binary{Op: "OR", Left: x, Right: &Binary{Op: "=", Left: left, Right: p.expression(1)}}
+		}
+		p.expect(")")
+	case p.take("BETWEEN"):
+		low := p.expression(5)
+		p.expect("AND")
+		high := p.expression(5)
+		x = &Binary{Op: "AND", Left: &Binary{Op: ">=", Left: left, Right: low}, Right: &Binary{Op: "<=", Left: left, Right: high}}
+	}
+	if not {
+		x = &Unary{Op: "NOT", X: x}
+	}
+	return x
 }

@@ -284,3 +284,86 @@ func TestMutationsSeekThroughIndexes(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestModuloAndConcatenation(t *testing.T) {
+	db := openTest(t)
+	got := queryTest(t, db, "SELECT 7 % 3, -7 % 3, 'a' || 'b' || ?, 1 + 2 * 3 % 4, 'x' || NULL", "c")
+	want := [][]Value{{int64(1), int64(-1), "abc", int64(3), nil}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	rows, err := db.Query(context.Background(), "SELECT 1 % 0")
+	if err == nil {
+		for rows.Next() {
+		}
+		err = rows.Err()
+		rows.Close()
+	}
+	if err == nil {
+		t.Fatal("modulo by zero accepted")
+	}
+}
+
+func TestLikeInBetween(t *testing.T) {
+	db := openTest(t)
+	execTest(t, db, "CREATE TABLE c (id INTEGER PRIMARY KEY, name TEXT, reg TEXT, n INTEGER)")
+	execTest(t, db, "CREATE INDEX cn ON c(n)")
+	execTest(t, db, "INSERT INTO c VALUES (1,'Ada Lovelace','PAA 1234',5),(2,'Alan Turing','PBB 99_1',10),(3,'grace hopper',NULL,15),(4,'100% Cotton','x',NULL)")
+	ids := func(where string, args ...any) []int64 {
+		t.Helper()
+		var out []int64
+		for _, r := range queryTest(t, db, "SELECT id FROM c WHERE "+where+" ORDER BY id", args...) {
+			out = append(out, r[0].(int64))
+		}
+		return out
+	}
+	tests := []struct {
+		where string
+		args  []any
+		want  []int64
+	}{
+		{"name LIKE 'a%'", nil, []int64{1, 2}},
+		{"name LIKE '%HOP%'", nil, []int64{3}},
+		{"name LIKE ?", []any{"%a_e%"}, []int64{1, 3}},
+		{"name NOT LIKE '%a%'", nil, []int64{4}},
+		{"reg LIKE '%9!_1' ESCAPE '!'", nil, []int64{2}},
+		{"reg LIKE '%9_1'", nil, []int64{2}},
+		{"name LIKE '100!%%' ESCAPE '!'", nil, []int64{4}},
+		{"name LIKE '%%%l%a%c%e'", nil, []int64{1}},
+		{"reg NOT LIKE '%'", nil, nil},
+		{"n IN (5, 15, NULL)", nil, []int64{1, 3}},
+		{"n NOT IN (5, ?)", []any{15}, []int64{2}},
+		{"n NOT IN (5, NULL)", nil, nil},
+		{"id IN (?)", []any{4}, []int64{4}},
+		{"n BETWEEN 5 AND 10", nil, []int64{1, 2}},
+		{"n NOT BETWEEN 6 AND 14", nil, []int64{1, 3}},
+		{"n BETWEEN ? AND ? AND name LIKE 'g%'", []any{1, 20}, []int64{3}},
+		{"NOT n BETWEEN 6 AND 14 OR id = 2", nil, []int64{1, 2, 3}},
+	}
+	for _, tt := range tests {
+		if got := ids(tt.where, tt.args...); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("%s: %v want %v", tt.where, got, tt.want)
+		}
+	}
+	plan := queryTest(t, db, "EXPLAIN QUERY PLAN SELECT id FROM c WHERE n BETWEEN ? AND ?", 1, 2)
+	if got := plan[0][3]; got != "SEARCH c USING INDEX cn (n>? AND n<?)" {
+		t.Errorf("BETWEEN plan: %v", got)
+	}
+	for _, q := range []string{"SELECT 1 LIKE 'x'", "SELECT 'a' LIKE 'a' ESCAPE 'xy'", "SELECT 'a' LIKE 'a!' ESCAPE '!'"} {
+		rows, err := db.Query(context.Background(), q)
+		if err == nil {
+			for rows.Next() {
+			}
+			err = rows.Err()
+			rows.Close()
+		}
+		if err == nil {
+			t.Errorf("%s accepted", q)
+		}
+	}
+	for _, q := range []string{"SELECT 1 IN ()", "SELECT 1 NOT 2", "SELECT 1 BETWEEN 2", "SELECT LIKE('a','b')"} {
+		if _, err := db.Query(context.Background(), q); err == nil {
+			t.Errorf("%s parsed", q)
+		}
+	}
+}
